@@ -69,12 +69,20 @@ public sealed class Program
         // Add named HTTP clients for IHttpClientFactory
         builder.Services.AddHttpClient();
 
+
         // Add in the rest of the services.
         builder.Services
             .AddMaintenanceServices()
             .AddEndpointsApiExplorer()
             .AddSwaggerGen()
-            .AddCorsPolicy(builder.Configuration)
+            //.AddCorsPolicy(builder.Configuration)
+            .AddCors(options =>
+            {
+                options.AddPolicy("AllowAll", x =>
+                    x.AllowAnyOrigin()
+                        .AllowAnyMethod()
+                        .AllowAnyHeader());
+            })
             .AddControllers()
             .AddJsonOptions(options =>
             {
