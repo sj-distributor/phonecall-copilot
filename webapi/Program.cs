@@ -75,14 +75,7 @@ public sealed class Program
             .AddMaintenanceServices()
             .AddEndpointsApiExplorer()
             .AddSwaggerGen()
-            //.AddCorsPolicy(builder.Configuration)
-            .AddCors(options =>
-            {
-                options.AddPolicy("AllowAll", x =>
-                    x.AllowAnyOrigin()
-                        .AllowAnyMethod()
-                        .AllowAnyHeader());
-            })
+            .AddCorsPolicy(builder.Configuration)
             .AddControllers()
             .AddJsonOptions(options =>
             {
