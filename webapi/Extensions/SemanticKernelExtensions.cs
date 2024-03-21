@@ -10,6 +10,7 @@ using CopilotChat.WebApi.Hubs;
 using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Plugins.Chat;
+using CopilotChat.WebApi.Plugins.Yesmeal;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
 using Microsoft.AspNetCore.Builder;
@@ -132,6 +133,10 @@ internal static class SemanticKernelExtensions
 
         // Time plugin
         kernel.ImportPluginFromObject(new TimePlugin(), nameof(TimePlugin));
+
+        // Yesmeal plugin
+        kernel.ImportPluginFromObject(new PhoneCallPlugin(sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<IOptions<ThirdPartyTokenOptions>>()), nameof(PhoneCallPlugin));
 
         return Task.CompletedTask;
     }
