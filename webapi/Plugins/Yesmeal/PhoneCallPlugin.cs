@@ -5,12 +5,14 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Threading.Tasks;
 using CopilotChat.WebApi.Dtos;
 using CopilotChat.WebApi.Models.Request;
 using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Plugins.Utils;
+using DocumentFormat.OpenXml.Office.CustomUI;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Newtonsoft.Json;
@@ -104,7 +106,7 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("customer want to check order detail")]
-    public static async Task<GetCurrentUserShoppingCartByMerchIdResponse> GetMerchantOrderDetailAsync()
+    public static async Task<string> GetMerchantOrderDetailAsync()
     {
         var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
         var httpClient = CreateYesmealHttpClient();
@@ -113,7 +115,17 @@ public class PhoneCallPlugin
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        return await response.Content.ReadFromJsonAsync<GetCurrentUserShoppingCartByMerchIdResponse>();
+        var orderDetailForMerch = await response.Content.ReadFromJsonAsync<GetCurrentUserShoppingCartByMerchIdResponse>();
+        if (orderDetailForMerch?.ShoppingCart == null || !orderDetailForMerch.ShoppingCart.ShoppingCartItems.Any())
+            return "你的购物车暂时没商品，请先进行下单，谢谢";
+        var result = new StringBuilder();
+        for(var i=0;i< orderDetailForMerch.ShoppingCart.ShoppingCartItems.Count;i++)
+        {
+            var item = orderDetailForMerch.ShoppingCart.ShoppingCartItems[i];
+            result.Append($"{i+1}.{item.FoodName}---单价：{item.Price}---数量:{item.Quantity}；");
+        }
+        result.Append($"总金额：{orderDetailForMerch.ShoppingCart.CartTotal}");
+        return result.ToString();
     }
 
     [KernelFunction, Description("customer want to place an order")]

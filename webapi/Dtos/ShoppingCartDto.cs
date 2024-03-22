@@ -30,7 +30,7 @@ public class ShoppingCartDto
 
     public ShoppingCartType ShoppingCartType { get; set; }
 
-    public decimal MerchMinimumAmountForDelivery { get; set; }
+    public decimal? MerchMinimumAmountForDelivery { get; set; }
 
     public decimal? MerchMinimumAmountToVoidDeliveryFee { get; set; }
 
@@ -50,16 +50,16 @@ public class ShoppingCartDto
 
     public List<CombinedShoppingCartItemDto> ShoppingCartItems { get; set; }
 
-    public decimal HowMuchMoreToGetFreeDelivery { get; set; }
+    public decimal? HowMuchMoreToGetFreeDelivery { get; set; }
     public bool IsPromotionOnlyMerch { get; set; }
 
     public bool ShowSales { get; set; }
 
-    public int MaxPreorderDays { get; set; }
+    public int? MaxPreorderDays { get; set; }
 
     public bool AcceptPreorder { get; set; }
 
-    public decimal CartTotal
+    public decimal? CartTotal
     {
         get
         {
@@ -67,7 +67,7 @@ public class ShoppingCartDto
         }
     }
 
-    public decimal CartTotalExcludeUnavailableItems
+    public decimal? CartTotalExcludeUnavailableItems
     {
         get
         {
@@ -96,7 +96,7 @@ public class ShoppingCartDto
             .OrderByDescending(x => x.DiscountPrice > 0 ? x.DiscountPrice : x.Price).FirstOrDefault();
     }
 
-    public decimal GetShoppingCartMaxProductExchangePrice(List<Guid> productExchangeFoodIds) =>
+    public decimal? GetShoppingCartMaxProductExchangePrice(List<Guid> productExchangeFoodIds) =>
         GetShoppingCartMaxProductExchangeItem(productExchangeFoodIds)?.Price ?? 0;
 }
 
@@ -116,17 +116,17 @@ public class ShoppingCartItemDto
     public string ExternalId { get; set; }
     public string FoodName { get; set; }
 
-    public int FoodStock { get; set; }
+    public int? FoodStock { get; set; }
 
     public string FoodBanner { get; set; }
 
-    public decimal FoodOriginalPrice { get; set; }
+    public decimal? FoodOriginalPrice { get; set; }
 
-    public int FoodLimitPerOrder { get; set; }
+    public int? FoodLimitPerOrder { get; set; }
 
     public int? FoodMinimumPurchaseQuantity { get; set; }
 
-    public int FoodMinimumPreOrderDays { get; set; }
+    public int? FoodMinimumPreOrderDays { get; set; }
 
     public MerchFoodStatus FoodStatus { get; set; }
 
@@ -145,15 +145,15 @@ public class ShoppingCartItemDto
 
     public int TotalQuantityInCart { get; set; }
 
-    public decimal Price { get; set; }
+    public decimal? Price { get; set; }
 
-    public decimal PriceOnAdded { get; set; }
+    public decimal? PriceOnAdded { get; set; }
 
-    public decimal DiscountPrice { get; set; }
+    public decimal? DiscountPrice { get; set; }
 
-    public decimal CutPriceDiscountPercentage { get; set; }
+    public decimal? CutPriceDiscountPercentage { get; set; }
 
-    public decimal FollowBuyDiscountPercentageLabel { get; set; }
+    public decimal? FollowBuyDiscountPercentageLabel { get; set; }
 
     public ShoppingCartItemParamsStatus ShoppingCartItemParamsStatus { get; set; }
 
@@ -169,7 +169,7 @@ public class ShoppingCartItemDto
     {
         get
         {
-            return ((DiscountPrice > 0 ? DiscountPrice : Price) +
+            return ((DiscountPrice.GetValueOrDefault() > 0 ? DiscountPrice.GetValueOrDefault() : Price.GetValueOrDefault()) +
                     ShoppingCartItemParams.Sum(p => p.Price * p.Quantity)) * Quantity;
         }
     }
@@ -219,10 +219,10 @@ public class CombinedShoppingCartItemDto : ShoppingCartItemDto
         {
             if (IsKocPromoFood)
             {
-                return (DiscountPrice + ShoppingCartItemParams.Sum(p => p.Price * p.Quantity)) * Quantity;
+                return (DiscountPrice.GetValueOrDefault() + ShoppingCartItemParams.Sum(p => p.Price * p.Quantity)) * Quantity;
             }
 
-            return ((DiscountPrice > 0 ? DiscountPrice : Price) +
+            return ((DiscountPrice.GetValueOrDefault() > 0 ? DiscountPrice.GetValueOrDefault() : Price.GetValueOrDefault()) +
                     ShoppingCartItemParams.Sum(p => p.Price * p.Quantity)) * Quantity;
         }
     }
