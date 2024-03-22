@@ -207,6 +207,7 @@ public class PhoneCallPlugin
                 ShouldThrowGroupifyError = false,
                 ShouldExcludePickupOrFallbackMerchants = false,
             }));
+        httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
         var response = await httpClient.PostAsync("https://testapi.yesmeal.com/api/shoppingcart/additem",httpContent)
             .ConfigureAwait(false);
