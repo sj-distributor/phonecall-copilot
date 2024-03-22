@@ -96,12 +96,28 @@ public class PhoneCallPlugin
             var recommendFood = await SearchSimilarFoodAsync(merchId,foodName);
             if (recommendFood == null) return $"暂无{foodName},请换一个好吗？";
 
-            var resultTemplate = $"查询到{recommendFood.Name},价钱：{recommendFood.Price},已帮你加入购物车。需要埋单吗？";
+            if (recommendFood.ParameterGroups.Count == 0)
+            {
+                var resultTemplate = $"查询到{recommendFood.Name},价钱：{recommendFood.Price},已帮你加入购物车。需要埋单吗？";
 
-            await AddToCartAsync(merchId, recommendFood.Id, 1);
-            Console.WriteLine(JsonConvert.SerializeObject(recommendFood));
+                await AddToCartAsync(merchId, recommendFood.Id, 1);
+                return await Task.FromResult(resultTemplate);
+            }
+            else
+            {
+                var stringBuilder = new StringBuilder($"发现{recommendFood.Name}有多个规格，分别有");
+                foreach (var parameterGroup in recommendFood.ParameterGroups)
+                {
+                    stringBuilder.Append($"\n {parameterGroup.Name}(){parameterGroup.Description}:");
+                    foreach (var item in parameterGroup.ParameterItems)
+                    {
+                        stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
+                    }
+                }
 
-            return await Task.FromResult(resultTemplate);
+                stringBuilder.Append("\n 请问你需要哪一个？");
+                return await Task.FromResult(stringBuilder.ToString());
+            }
         }, nameof(GetMerchantAddress));
     }
 
@@ -119,12 +135,14 @@ public class PhoneCallPlugin
         if (orderDetailForMerch?.ShoppingCart == null || !orderDetailForMerch.ShoppingCart.ShoppingCartItems.Any())
             return "你的购物车暂时没商品，请先进行下单，谢谢";
         var result = new StringBuilder();
-        for(var i=0;i< orderDetailForMerch.ShoppingCart.ShoppingCartItems.Count;i++)
+        for (var i = 0; i < orderDetailForMerch.ShoppingCart.ShoppingCartItems.Count; i++)
         {
             var item = orderDetailForMerch.ShoppingCart.ShoppingCartItems[i];
-            result.Append($"{i+1}.{item.FoodName}---单价：{item.Price}---数量:{item.Quantity}；");
+            var parameterFoodDesc = item.ShoppingCartItemParams.Any() ? item.ShoppingCartItemParams.FirstOrDefault()?.Name : " ";
+            result.Append(
+                $"{i + 1}.{item.FoodName} {parameterFoodDesc}---单价：{item.Price} ---数量:{item.Quantity}；");
         }
-        result.Append($"总金额：{orderDetailForMerch.ShoppingCart.CartTotal}");
+        result.Append($"\n 总金额：{orderDetailForMerch.ShoppingCart.CartTotal}");
         return result.ToString();
     }
 
@@ -139,7 +157,7 @@ public class PhoneCallPlugin
             {
                 MerchId = merchId
             }));
-
+        httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         var response = await httpClient.PostAsync("https://testapi.yesmeal.com/api/order/by/phonecall",httpContent)
             .ConfigureAwait(false);
 
@@ -147,6 +165,12 @@ public class PhoneCallPlugin
         var result = await response.Content.ReadFromJsonAsync<AddOrderByMerchIdResponse>();
 
         return $"下单成功，你的取餐号为：{result.MealCode}，请在{result.PickupTime}左右到店pick up，多谢。";
+    }
+
+    [KernelFunction, Description("customers have selected the respective product/food specifications.")]
+    public static async Task<string> AddSpecificationsFoodsync([Description("Food items with specified specifications")]string specificationsFood)
+    {
+        return await Task.FromResult("选择了"+specificationsFood);
     }
 
     private static async Task<MerchFoodDto> SearchSimilarFoodAsync(Guid merchId, string foodName)
