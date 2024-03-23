@@ -12,9 +12,11 @@ using CopilotChat.WebApi.Models.Request;
 using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Plugins.Utils;
+using CopilotChat.WebApi.Storage;
 using DocumentFormat.OpenXml.Office.CustomUI;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
 using Newtonsoft.Json;
 
 namespace CopilotChat.WebApi.Plugins.Yesmeal;
@@ -23,6 +25,7 @@ public class PhoneCallPlugin
 {
     private static IHttpClientFactory _httpClientFactory;
     private static ThirdPartyTokenOptions _thirdPartyTokenOptions;
+    private static Dictionary<string,MerchFoodDto> merchFoodDic;
     public PhoneCallPlugin(IHttpClientFactory httpClientFactory, IOptions<ThirdPartyTokenOptions> thirdPartyTokenOptions)
     {
         _httpClientFactory = httpClientFactory;
@@ -105,16 +108,17 @@ public class PhoneCallPlugin
             }
             else
             {
-                var stringBuilder = new StringBuilder($"发现{recommendFood.Name}有多个规格，分别有");
+                var stringBuilder = new StringBuilder($"查询到{recommendFood.Name},价钱：{recommendFood.Price}，含有多个规格，分别有");
                 foreach (var parameterGroup in recommendFood.ParameterGroups)
                 {
-                    stringBuilder.Append($"\n {parameterGroup.Name}(){parameterGroup.Description}:");
+                    stringBuilder.Append($"\n {parameterGroup.Name}({parameterGroup.Description}):");
                     foreach (var item in parameterGroup.ParameterItems)
                     {
                         stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
                     }
                 }
 
+                merchFoodDic[recommendFood.Id.ToString()] = recommendFood;
                 stringBuilder.Append("\n 请问你需要哪一个？");
                 return await Task.FromResult(stringBuilder.ToString());
             }
@@ -139,8 +143,7 @@ public class PhoneCallPlugin
         {
             var item = orderDetailForMerch.ShoppingCart.ShoppingCartItems[i];
             var parameterFoodDesc = item.ShoppingCartItemParams.Any() ? item.ShoppingCartItemParams.FirstOrDefault()?.Name : " ";
-            result.Append(
-                $"{i + 1}.{item.FoodName} {parameterFoodDesc}---单价：{item.Price} ---数量:{item.Quantity}；");
+            result.Append($"{i + 1}.{item.FoodName} {parameterFoodDesc}---单价：{item.Price} ---数量:{item.Quantity}；");
         }
         result.Append($"\n 总金额：{orderDetailForMerch.ShoppingCart.CartTotal}");
         return result.ToString();
@@ -168,9 +171,10 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("customers have selected the respective product/food specifications.")]
-    public static async Task<string> AddSpecificationsFoodsync([Description("Food items with specified specifications")]string specificationsFood)
+    [return: Description("Please be careful not to alter the returned original text information")]
+    public static async Task<string> AddSpecificationsFoodsync([Description("Food items with specified specifications")]string specificationsName)
     {
-        return await Task.FromResult("选择了"+specificationsFood);
+        return await Task.FromResult("选择/换了" + specificationsName);
     }
 
     private static async Task<MerchFoodDto> SearchSimilarFoodAsync(Guid merchId, string foodName)
