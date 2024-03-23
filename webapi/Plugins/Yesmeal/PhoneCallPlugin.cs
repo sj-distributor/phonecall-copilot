@@ -25,7 +25,7 @@ public class PhoneCallPlugin
 {
     private static IHttpClientFactory _httpClientFactory;
     private static ThirdPartyTokenOptions _thirdPartyTokenOptions;
-    private static Dictionary<string,MerchFoodDto> merchFoodDic;
+    private static Dictionary<string,MerchFoodDto> merchFoodDic = new Dictionary<string, MerchFoodDto>();
     public PhoneCallPlugin(IHttpClientFactory httpClientFactory, IOptions<ThirdPartyTokenOptions> thirdPartyTokenOptions)
     {
         _httpClientFactory = httpClientFactory;
@@ -122,7 +122,7 @@ public class PhoneCallPlugin
                 stringBuilder.Append("\n 请问你需要哪一个？");
                 return await Task.FromResult(stringBuilder.ToString());
             }
-        }, nameof(GetMerchantAddress));
+        }, nameof(AskForFoodDetail));
     }
 
     [KernelFunction, Description("customer want to check order detail")]
