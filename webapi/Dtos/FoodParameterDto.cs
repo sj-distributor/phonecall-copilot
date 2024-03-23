@@ -10,3 +10,9 @@ public class FoodParameterDto
     public int Quantity { get; set; }
     public Guid ParameterGroupId { get; set; }
 }
+
+public class FoodParameterMapDto
+{
+    public Guid FoodId { get; set; }
+    public Guid ParameterItemId { get; set; }
+}

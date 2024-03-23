@@ -39,7 +39,7 @@ public class PhoneCallPlugin
     {
         return await AsyncUtils.SafeInvokeAsync<string>(async () =>
         {
-            var httpClient = CreateYesmealHttpClient();
+            using var  httpClient = CreateYesmealHttpClient();
 
             var response = await httpClient.GetAsync("https://testapi.yamimeal.com/api/MerchCouponDistributionCampaign/query?CampaignType=1").ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
@@ -63,7 +63,7 @@ public class PhoneCallPlugin
     {
         return await AsyncUtils.SafeInvokeAsync<string>(async () =>
         {
-            var httpClient = CreateYesmealHttpClient();
+            using var  httpClient = CreateYesmealHttpClient();
 
             var response = await httpClient
                 .GetAsync("https://testapi.yamimeal.com/api/Merch/get?Id=3bd51ea0-9b3e-45f2-92b7-c30fb162f910")
@@ -103,7 +103,7 @@ public class PhoneCallPlugin
             {
                 var resultTemplate = $"查询到{recommendFood.Name},价钱：{recommendFood.Price},已帮你加入购物车。需要埋单吗？";
 
-                await AddToCartAsync(merchId, recommendFood.Id, 1);
+                await AddToCartAsync(merchId, recommendFood, 1);
                 return await Task.FromResult(resultTemplate);
             }
             else
@@ -129,7 +129,7 @@ public class PhoneCallPlugin
     public static async Task<string> GetMerchantOrderDetailAsync()
     {
         var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-        var httpClient = CreateYesmealHttpClient();
+        using var  httpClient = CreateYesmealHttpClient();
 
         var response = await httpClient.GetAsync($"https://testapi.yesmeal.com/api/shoppingcart/bymerch?merchid={merchId}")
             .ConfigureAwait(false);
@@ -153,7 +153,7 @@ public class PhoneCallPlugin
     public static async Task<string> AddOrderByMerchIdAsync()
     {
         var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-        var httpClient = CreateYesmealHttpClient();
+        using var  httpClient = CreateYesmealHttpClient();
 
         var httpContent = new StringContent(JsonConvert.SerializeObject(new
             AddOrderByMerchIdRequest
@@ -174,14 +174,46 @@ public class PhoneCallPlugin
     [return: Description("Please be careful not to alter the returned original text information")]
     public static async Task<string> AddSpecificationsFoodsync([Description("Food items with specified specifications")]string specificationsName)
     {
-        return await Task.FromResult("选择/换了" + specificationsName);
+        var askGptRequest = new AskGptRequest
+        {
+            Model = 6,
+            ResponseFormat = new ResponseFormat { Type = "json_object" },
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "user",
+                    Content = "根据用户给的商品规格名称和商品JSON能匹配出对应的id和parameterItemId；" +
+                              $"商品JSON:{JsonConvert.SerializeObject(merchFoodDic)};" +
+                              "如果找到匹配项，输出的格式一定要是符合这个JSON：[{\"foodId\": \"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\", \"parameterItemId\":\"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\"}];" +
+                              "如果没有找到匹配项，则只需要返回[]，一定不要加入商品JSON不存在的id，确保程序能够正确地解析用户输入的规格名称，并从提供的 JSON 数据中查找匹配项;",
+                },
+                new()
+                {
+                    Role = "system",
+                    Content = "商品规格名称:" + specificationsName
+                }
+            }
+        };
+        var foodParameterMap = await AskGptAsync(askGptRequest);
+
+        var foodObj = merchFoodDic[foodParameterMap.FoodId.ToString()];
+        if (foodObj != null)
+        {
+            var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
+            await AddToCartAsync(merchId, foodObj, 1, foodParameterMap.ParameterItemId);
+            merchFoodDic[foodParameterMap.FoodId.ToString()] = null;
+            return await Task.FromResult("好的，已帮你加入购物车。需要埋单吗？");
+        }
+
+        return await Task.FromResult("抱歉，系统开了小差，请再说多一次好吗？");
     }
 
     private static async Task<MerchFoodDto> SearchSimilarFoodAsync(Guid merchId, string foodName)
     {
         return await AsyncUtils.SafeInvokeAsync<MerchFoodDto>(async () =>
         {
-            var httpClient = CreateYesmealHttpClient(new Dictionary<string, string>{ {"LanguageCode", "zh-TW"}});
+            using var  httpClient = CreateYesmealHttpClient(new Dictionary<string, string>{ {"LanguageCode", "zh-TW"}});
             var httpContent = new StringContent(JsonConvert.SerializeObject(new RecommendSimilarFoodsRequest
             {
                 Keyword = foodName, MerchIds = new List<Guid> { merchId },
@@ -202,7 +234,7 @@ public class PhoneCallPlugin
 
     private static async Task<string> Translation(string content)
     {
-        var httpClient = CreateSmartiesHttpClient();
+        using var  httpClient = CreateSmartiesHttpClient();
 
         var httpContent = new StringContent(JsonConvert.SerializeObject(new
             TranslationRequest
@@ -218,31 +250,48 @@ public class PhoneCallPlugin
         return await response.Content.ReadAsStringAsync();
     }
 
-    private static async Task<AskGptResponse> AskGptAsync(AskGptRequest request)
+    private static async Task<FoodParameterMapDto> AskGptAsync(AskGptRequest request)
     {
-        var httpClient = CreateSmartiesHttpClient();
+        return await AsyncUtils.SafeInvokeAsync<FoodParameterMapDto>(async () =>
+        {
+            using var httpClient = CreateSmartiesHttpClient();
+            var httpContent = new StringContent(JsonConvert.SerializeObject(request));
+            httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            var response = await httpClient.PostAsync("https://testsmarties.yamimeal.ca/api/Ask/general/query", httpContent)
+                .ConfigureAwait(false);
 
-        var httpContent = new StringContent(JsonConvert.SerializeObject(request));
+            response.EnsureSuccessStatusCode();
 
-        var response = await httpClient.PostAsync("https://smarties.yamimeal.ca/api/ask/general/query",httpContent)
-            .ConfigureAwait(false);
-
-        response.EnsureSuccessStatusCode();
-
-        return await response.Content.ReadFromJsonAsync<AskGptResponse>();
+            var askGptResult = await response.Content.ReadFromJsonAsync<AskGptResponse>();
+            var foodParamMap = JsonConvert.DeserializeObject<FoodParameterMapDto>(askGptResult.Data.Response);
+            if (foodParamMap != null && foodParamMap.FoodId != Guid.Empty)
+                return foodParamMap;
+            throw new Exception("Response mapping異常:" + askGptResult.Data.Response);
+        },nameof(AskGptAsync));
     }
 
-    private static async Task<string> AddToCartAsync(Guid merchId, Guid foodId,int quantity)
+    private static async Task<string> AddToCartAsync(Guid merchId, MerchFoodDto merchFood,int quantity,
+        Guid? parameterItemId = null)
     {
-        var httpClient = CreateYesmealHttpClient();
+        using var httpClient = CreateYesmealHttpClient();
+        var foodParameters = new List<FoodParameterDto>();
+        if (parameterItemId != null)
+        {
+             var foodParam=merchFood.ParameterGroups.SelectMany(x => x.ParameterItems).FirstOrDefault(x => x.Id == parameterItemId);
+             if (foodParam != null)
+                 foodParameters.Add(new FoodParameterDto
+                 {
+                     ParameterId = foodParam.Id, Quantity = 1, ParameterGroupId = foodParam.GroupId
+                 });
+        }
 
         var httpContent = new StringContent(JsonConvert.SerializeObject(new
             AddOrUpdateItemToCartRequest
             {
                 MerchId = merchId,
-                FoodId = foodId,
+                FoodId = merchFood.Id,
                 Quantity = quantity,
-                FoodParameters = new List<FoodParameterDto>(),
+                FoodParameters = foodParameters,
                 DeliveryType = 0,
                 ShouldThrowGroupifyError = false,
                 ShouldExcludePickupOrFallbackMerchants = false,
@@ -256,9 +305,10 @@ public class PhoneCallPlugin
         return await response.Content.ReadAsStringAsync();
     }
 
-    private static async Task EmptyCartAsync()
+    [KernelFunction, Description("empty/clear/remove the shoppingcart")]
+    public static async Task EmptyCartAsync()
     {
-        var httpClient = CreateYesmealHttpClient();
+        using var  httpClient = CreateYesmealHttpClient();
 
         var httpContent = new StringContent(JsonConvert.SerializeObject(new
             EmptyShoppingCartRequest
@@ -267,7 +317,7 @@ public class PhoneCallPlugin
                 ShouldThrowGroupifyError = false,
                 ShouldExcludePickupOrFallbackMerchants = false
             }));
-
+        httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         var response = await httpClient.PostAsync("https://testapi.yesmeal.com/api/shoppingcart/empty",httpContent)
             .ConfigureAwait(false);
 
