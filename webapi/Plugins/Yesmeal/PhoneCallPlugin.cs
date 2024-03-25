@@ -32,8 +32,8 @@ public class PhoneCallPlugin
         _thirdPartyTokenOptions = thirdPartyTokenOptions.Value;
     }
 
-    [KernelFunction, Description("Get merchant campaign, activities")]
-    [return: Description("The campaign details")]
+    [KernelFunction, Description("Get campaign/activities of merchant，restaurant")]
+    [return: Description("The campaign/activities details")]
     public static async Task<string> GetMerchantCampaign(
         KernelArguments args)
     {
@@ -57,7 +57,7 @@ public class PhoneCallPlugin
         }, nameof(GetMerchantCampaign));
     }
 
-    [KernelFunction, Description("Get merchant address, location")]
+    [KernelFunction, Description("Get address/location of merchant，restaurant ")]
     public static async Task<string> GetMerchantAddress(
         KernelArguments args)
     {
@@ -203,7 +203,7 @@ public class PhoneCallPlugin
             var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
             await AddToCartAsync(merchId, foodObj, 1, foodParameterMap.ParameterItemId);
             merchFoodDic[foodParameterMap.FoodId.ToString()] = null;
-            return await Task.FromResult("好的，已帮你加入购物车。需要埋单吗？");
+            return await Task.FromResult("好的，已帮你加入购物车。请问还需要其他吗？还是埋单吗？");
         }
 
         return await Task.FromResult("抱歉，系统开了小差，请再说多一次好吗？");
