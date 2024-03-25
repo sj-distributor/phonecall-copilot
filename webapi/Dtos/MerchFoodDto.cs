@@ -95,7 +95,7 @@ public class ParameterGroupDto
         set => _maximumSelection = value;
     }
 
-    public bool ParticipateQuantityCalculation { get; set; }
+    public bool IsAnswer { get; set; } = false;
 }
 
 public class ParameterItemDto
@@ -115,6 +115,8 @@ public class ParameterItemDto
     public int? MaximumSelection { get; set; }
 
     public int SaleToCalculateUnitQtyConversion { get; set; }
+
+    public bool IsSelected { get; set; } = false;
 }
 
 public enum MerchFoodStatus

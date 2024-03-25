@@ -108,14 +108,12 @@ public class PhoneCallPlugin
             }
             else
             {
-                var stringBuilder = new StringBuilder($"查询到{recommendFood.Name},价钱：{recommendFood.Price}，含有多个规格，分别有");
-                foreach (var parameterGroup in recommendFood.ParameterGroups)
+                var stringBuilder = new StringBuilder($"查询到{recommendFood.Name},价钱：{recommendFood.Price}");
+                var parameterGroup = recommendFood.ParameterGroups.First();
+                stringBuilder.Append($"\n ，在规格 {parameterGroup.Name}({parameterGroup.Description})，分别有：");
+                foreach (var item in parameterGroup.ParameterItems)
                 {
-                    stringBuilder.Append($"\n {parameterGroup.Name}({parameterGroup.Description}):");
-                    foreach (var item in parameterGroup.ParameterItems)
-                    {
-                        stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
-                    }
+                    stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
                 }
 
                 merchFoodDic[recommendFood.Id.ToString()] = recommendFood;
@@ -200,9 +198,36 @@ public class PhoneCallPlugin
         var foodObj = merchFoodDic[foodParameterMap.FoodId.ToString()];
         if (foodObj != null)
         {
-            var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-            await AddToCartAsync(merchId, foodObj, 1, foodParameterMap.ParameterItemId);
-            merchFoodDic[foodParameterMap.FoodId.ToString()] = null;
+            var foodParameter = merchFoodDic[foodParameterMap.FoodId.ToString()];
+            var foodItemParameter = foodParameter.ParameterGroups
+                .SelectMany(x => x.ParameterItems).FirstOrDefault(x => x.Id == foodParameterMap.ParameterItemId);
+            var foodGroupParameter = foodParameter.ParameterGroups.FirstOrDefault(x => x.Id == foodItemParameter.GroupId);
+            foodGroupParameter.IsAnswer = foodItemParameter.IsSelected = true;
+            if (foodParameter.ParameterGroups.All(x => x.IsAnswer))
+            {
+                var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
+                var selectedFoodParamList = foodParameter.ParameterGroups.Where(x => x.IsAnswer)
+                    .Select(x => x.ParameterItems.First(t => t.IsSelected)).Select(x => new FoodParameterDto
+                    {
+                        ParameterId = x.Id, Quantity = 1, ParameterGroupId = x.GroupId
+                    }).ToList();
+                await AddToCartAsync(merchId, foodObj, 1, selectedFoodParamList);
+            }
+            else
+            {
+                var needSelectedFoodGroup = foodParameter.ParameterGroups.FirstOrDefault(x => !x.IsAnswer);
+                var stringBuilder = new StringBuilder();
+
+                stringBuilder.Append(
+                    $"好的，已帮你选择{foodGroupParameter.Name}规格：{foodItemParameter.Name} \n 在{needSelectedFoodGroup.Name}规格方面还有以下需要选择：");
+                foreach (var item in needSelectedFoodGroup.ParameterItems)
+                {
+                    stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
+                }
+
+                stringBuilder.Append("\n 请问你需要哪一个？");
+                return await Task.FromResult(stringBuilder.ToString());
+            }
             return await Task.FromResult("好的，已帮你加入购物车。请问还需要其他吗？还是埋单吗？");
         }
 
@@ -271,19 +296,9 @@ public class PhoneCallPlugin
     }
 
     private static async Task<string> AddToCartAsync(Guid merchId, MerchFoodDto merchFood,int quantity,
-        Guid? parameterItemId = null)
+        List<FoodParameterDto>? foodParameters = null)
     {
         using var httpClient = CreateYesmealHttpClient();
-        var foodParameters = new List<FoodParameterDto>();
-        if (parameterItemId != null)
-        {
-             var foodParam=merchFood.ParameterGroups.SelectMany(x => x.ParameterItems).FirstOrDefault(x => x.Id == parameterItemId);
-             if (foodParam != null)
-                 foodParameters.Add(new FoodParameterDto
-                 {
-                     ParameterId = foodParam.Id, Quantity = 1, ParameterGroupId = foodParam.GroupId
-                 });
-        }
 
         var httpContent = new StringContent(JsonConvert.SerializeObject(new
             AddOrUpdateItemToCartRequest
