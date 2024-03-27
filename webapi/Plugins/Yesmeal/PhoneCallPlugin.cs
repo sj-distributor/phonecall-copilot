@@ -32,7 +32,7 @@ public class PhoneCallPlugin
         _thirdPartyTokenOptions = thirdPartyTokenOptions.Value;
     }
 
-    [KernelFunction, Description("Get campaign/activities of merchant，restaurant")]
+    [KernelFunction, Description("Get campaign/activities of merchant，restaurant,")]
     [return: Description("The campaign/activities details")]
     public static async Task<string> GetMerchantCampaign(
         KernelArguments args)
@@ -57,7 +57,7 @@ public class PhoneCallPlugin
         }, nameof(GetMerchantCampaign));
     }
 
-    [KernelFunction, Description("Get address/location of merchant，restaurant ")]
+    [KernelFunction, Description("Get the address or location of a business or restaurant")]
     public static async Task<string> GetMerchantAddress(
         KernelArguments args)
     {
@@ -96,7 +96,7 @@ public class PhoneCallPlugin
         return await AsyncUtils.SafeInvokeAsync<string>(async () =>
         {
             var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-            var recommendFood = await SearchSimilarFoodAsync(merchId,foodName);
+            var recommendFood = await GetRecommendFoodAsync(merchId, foodName);
             if (recommendFood == null) return $"暂无{foodName},请换一个好吗？";
 
             if (recommendFood.ParameterGroups.Count == 0)
@@ -234,7 +234,7 @@ public class PhoneCallPlugin
         return await Task.FromResult("抱歉，系统开了小差，请再说多一次好吗？");
     }
 
-    private static async Task<MerchFoodDto> SearchSimilarFoodAsync(Guid merchId, string foodName)
+    private static async Task<MerchFoodDto> GetRecommendFoodAsync(Guid merchId, string foodName = null)
     {
         return await AsyncUtils.SafeInvokeAsync<MerchFoodDto>(async () =>
         {
@@ -254,7 +254,7 @@ public class PhoneCallPlugin
             var recommendFood = recommendSimilarFoods?.SimilarFoods.FirstOrDefault();
 
             return await Task.FromResult(recommendFood);
-        }, nameof(SearchSimilarFoodAsync));
+        }, nameof(GetRecommendFoodAsync));
     }
 
     private static async Task<string> Translation(string content)
