@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using CopilotChat.WebApi.Dtos;
@@ -23,20 +24,139 @@ namespace CopilotChat.WebApi.Plugins.Yesmeal;
 
 public class PhoneCallPlugin
 {
-    private static IHttpClientFactory _httpClientFactory;
-    private static ThirdPartyTokenOptions _thirdPartyTokenOptions;
-    private static Dictionary<string,MerchFoodDto> merchFoodDic = new Dictionary<string, MerchFoodDto>();
-    public PhoneCallPlugin(IHttpClientFactory httpClientFactory, IOptions<ThirdPartyTokenOptions> thirdPartyTokenOptions)
+    private IHttpClientFactory _httpClientFactory;
+    private ThirdPartyTokenOptions _thirdPartyTokenOptions;
+    private static Dictionary<string, MerchFoodDto> merchFoodDic = new Dictionary<string, MerchFoodDto>();
+
+    public PhoneCallPlugin(IHttpClientFactory httpClientFactory,
+        IOptions<ThirdPartyTokenOptions> thirdPartyTokenOptions)
     {
         _httpClientFactory = httpClientFactory;
         _thirdPartyTokenOptions = thirdPartyTokenOptions.Value;
     }
 
-    [KernelFunction, Description("Get campaign/activities of merchant，restaurant,")]
-    [return: Description("The campaign/activities details")]
-    public static async Task<string> GetMerchantCampaign(
-        KernelArguments args)
+    [KernelFunction, Description("spot the intent")]
+    public   async Task<string> IntentSpotAsync(KernelArguments arguments)
     {
+        if (arguments["question"] == null) return "抱歉，系统暂时开了小差，请重新发送消息～";
+        var chatHistory = arguments["ChatHistory"].ToString();
+        var question = arguments["question"].ToString();
+
+        if (merchFoodDic.Values.Any(x => x.ParameterGroups.Exists(t => !t.IsAnswer)))
+        {
+            Console.WriteLine("has SpecificationsFoods need to select");
+            return await AddSpecificationsFoodsync(question);
+        }
+        Console.WriteLine("normal");
+        var statementOrCommandIntentResult = await AskGptAsync(GetStatementOrCommandIntent(question));
+        if (statementOrCommandIntentResult.Data.Response == null)
+            return  await Task.FromResult("抱歉，无法识别您的意图，请再换一种方式提问好吗？");
+
+        var askIntentDto = JsonConvert.DeserializeObject<AskIntentDto>(statementOrCommandIntentResult.Data.Response.Replace("\n","").Replace(" ",""));
+        if (!string.IsNullOrWhiteSpace(askIntentDto.AnswerPhrase))
+        {
+            var askPhraseIntentResult = await AskGptAsync(GetPhraseIntentMap(askIntentDto.AnswerPhrase, chatHistory));
+            var phraseIntentValue = JsonConvert.DeserializeObject<PhraseIntentValueDto>(askPhraseIntentResult.Data.Response);
+            if (!phraseIntentValue.IsPositive)
+            {
+
+                return "好的，请问还有什么可以帮到你吗？";
+            }
+            var result= await CallIntentFunction(false, phraseIntentValue.IntentValue);
+            return PolishIntentAnswer(phraseIntentValue.IntentValue, result);
+        }
+
+        var askIntentMapResult = await AskGptAsync(GetStandardIntentMap(string.IsNullOrWhiteSpace(askIntentDto.ActionContent) ? question:askIntentDto.ActionContent, chatHistory));
+        if (askIntentMapResult.Data.Response == null)
+            return await Task.FromResult("抱歉，无法识别您的意图，请再换一种方式提问好吗？");
+        var intentValue = JsonConvert.DeserializeObject<IntentValueDto>(askIntentMapResult.Data.Response);
+
+        return await CallIntentFunction(askIntentDto.IsAsking, intentValue);
+    }
+
+    private List<IntentValueDto> GetStandardIntentInfo()
+    {
+        return new List<IntentValueDto>
+        {
+            new() { Intent = "地址", Value = 0 },
+            new() { Intent = "活动", Value = 1 },
+            new() { Intent = "停车场", Value = 2 },
+            new() { Intent = "推荐菜", Value = 3 },
+            new() { Intent = "下单", Value = 4 },
+            new() { Intent = "加入购物车", Value = 5, FoodName = "" },
+            new() { Intent = "删除商品", Value = 6, FoodName = "" },
+            new() { Intent = "订单详情", Value = 7 }
+        };
+    }
+
+    private List<IntentValueDto> GetContextAnswerPhrase()
+    {
+        return new List<IntentValueDto>
+        {
+            new() { Intent = "同意", Value = 0 },
+            new() { Intent = "确认", Value = 1 },
+            new() { Intent = "好的", Value = 2 },
+            new() { Intent = "不要了", Value = 3 },
+            new() { Intent = "获取订单详情", Value = 7 }
+        };
+    }
+
+    private  string PolishIntentAnswer(IntentValueDto intentValue,  string answer)
+    {
+        switch (intentValue.Value)
+        {
+            case 0:
+                return $"你好，地址是：{answer}";
+            case 1:
+                return $"活动内容如下：\n {answer} \n 请问还有什么可以帮到你吗？";
+            case 2:
+                return "你好，暂时没停车场哦，请问还有什么可以帮到你？";
+            case 3:
+                return answer;
+            case 4:
+                return answer;
+            case 5:
+                return answer;
+            case 6:
+                return "暂不支持的操作";
+            case 7:
+                return answer;
+            default:
+                return "识别不到的意图";
+        }
+    }
+
+    private async Task<string> CallIntentFunction(bool isAsking, IntentValueDto intentValue)
+    {
+        switch (intentValue.Value)
+        {
+            case 0:
+                return await GetMerchantAddress(isAsking);
+            case 1:
+                return await GetMerchantCampaign(isAsking);
+            case 2:
+                return await GetMerchantParkingInfo(isAsking);
+            case 3:
+                return await GetRecommendDishWithoutSpecificCategoryName(isAsking);
+            case 4:
+                return await AddOrderByMerchIdAsync(isAsking);
+            case 5:
+                return await AskForFoodDetail(intentValue.FoodName, "1", "", isAsking);
+            case 6:
+                return "暂不支持的操作";
+            case 7:
+                return await GetMerchantOrderDetailAsync();
+            default:
+                return "识别不到的意图";
+        }
+    }
+
+    [KernelFunction, Description("Get campaign/activities of merchant，restaurant,")]
+    public async Task<string> GetMerchantCampaign(bool isAsking)
+    {
+        if (isAsking)
+            return await Task.FromResult("最近有活动，需要我帮你查询吗？");
+
         return await AsyncUtils.SafeInvokeAsync<string>(async () =>
         {
             using var  httpClient = CreateYesmealHttpClient();
@@ -58,8 +178,7 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("Get the address or location of a business or restaurant")]
-    public static async Task<string> GetMerchantAddress(
-        KernelArguments args)
+    public   async Task<string> GetMerchantAddress(bool isAsking)
     {
         return await AsyncUtils.SafeInvokeAsync<string>(async () =>
         {
@@ -78,18 +197,47 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("Get merchant parking information")]
-    public static async Task<string> GetMerchantParkingInfo(
-        KernelArguments args)
+    public   async Task<string> GetMerchantParkingInfo(bool isAsking)
     {
         return await Task.FromResult("暂无停车场");
     }
 
+    [KernelFunction, Description("Recommend a dish without specific category names，for example : user asked if he could recommend a dish")]
+    public   async Task<string> GetRecommendDishWithoutSpecificCategoryName(bool isAsking)
+    {
+        Console.WriteLine("hit GetRecommendDishWithoutSpecificCategoryName");
+        var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
+        var FoodCategory = new[] { "牛肉", "豬肉", "雞肉", "麵類", "粥" };
+        var random = new Random();
+        int randomNumber = random.Next(1, 6); // 生成1到5之间的随机数
+        var recommendFood = await GetRecommendFoodAsync(merchId, foodName: FoodCategory[randomNumber - 1]);
+        if (recommendFood == null)
+            return await Task.FromResult("今天暂无推荐菜哦。请问还有什么可以帮到你？");
+
+        var resultTemplate = $"今日推荐：{recommendFood.Name}, 价钱：{recommendFood.Price}, 需要帮你加入购物车吗？";
+        return await Task.FromResult(resultTemplate);
+    }
+
+    [KernelFunction, Description("Recommend a dish with specific category names，for example : user asked if there were any beef dishes to recommend.")]
+    public   async Task<string> GetRecommendDishWithSpecificCategoryName([Description("specific category name")]string categoryName,
+        KernelArguments args)
+    {
+        Console.WriteLine("hit GetRecommendDishWithSpecificCategoryName");
+        var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
+        var recommendFood = await GetRecommendFoodAsync(merchId, foodName: categoryName);
+        if (recommendFood == null)
+            return await Task.FromResult($"今天暂无{categoryName}的推荐菜哦。请问还有什么可以帮到你？");
+
+        var resultTemplate = $"今日推荐：{recommendFood.Name}, 价钱：{recommendFood.Price}, 需要帮你加入购物车吗？";
+        return await Task.FromResult(resultTemplate);
+    }
+
     [KernelFunction, Description("customer want to eat or order specific dish name, for example, milk, tea, rice, sandwich, chicken chop, pork chop, lunch meat, egg, fish, ham, noodles, porridge, vegetable")]
-    public static async Task<string> AskForFoodDetail(
+    public   async Task<string> AskForFoodDetail(
         [Description("the name of food")]string foodName,
         [Description("the quantity of food")]string quantity,
         [Description("the special comment of food")]string specialComment,
-        KernelArguments args)
+        bool isAsking)
     {
         Console.WriteLine("hit the AskForFoodDetail:" + foodName);
 
@@ -101,7 +249,9 @@ public class PhoneCallPlugin
 
             if (recommendFood.ParameterGroups.Count == 0)
             {
-                var resultTemplate = $"查询到{recommendFood.Name},价钱：{recommendFood.Price},已帮你加入购物车。需要埋单吗？";
+                if (isAsking)
+                    return await Task.FromResult($"查询到{recommendFood.Name},价钱：{recommendFood.Price}, 需要帮你加入购物车吗？");
+                var resultTemplate = $"你好，{recommendFood.Name}已帮你加入购物车。需要埋单吗？";
 
                 await AddToCartAsync(merchId, recommendFood, 1);
                 return await Task.FromResult(resultTemplate);
@@ -124,7 +274,7 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("customer want to check order detail")]
-    public static async Task<string> GetMerchantOrderDetailAsync()
+    public  async Task<string> GetMerchantOrderDetailAsync()
     {
         var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
         using var  httpClient = CreateYesmealHttpClient();
@@ -137,18 +287,20 @@ public class PhoneCallPlugin
         if (orderDetailForMerch?.ShoppingCart == null || !orderDetailForMerch.ShoppingCart.ShoppingCartItems.Any())
             return "你的购物车暂时没商品，请先进行下单，谢谢";
         var result = new StringBuilder();
+        result.Append("您的订单详情如下：\n\n");
         for (var i = 0; i < orderDetailForMerch.ShoppingCart.ShoppingCartItems.Count; i++)
         {
             var item = orderDetailForMerch.ShoppingCart.ShoppingCartItems[i];
-            var parameterFoodDesc = item.ShoppingCartItemParams.Any() ? item.ShoppingCartItemParams.FirstOrDefault()?.Name : " ";
-            result.Append($"{i + 1}.{item.FoodName} {parameterFoodDesc}---单价：{item.Price} ---数量:{item.Quantity}；");
+            var parameterFoodDesc = item.ShoppingCartItemParams.Any() ? string.Join(",",item.ShoppingCartItemParams.Select(t => t.Name)) : " ";
+
+            result.Append($"{i + 1}.{item.FoodName} {parameterFoodDesc}---单价：{item.Price} ---数量:{item.Quantity}；\n\n");
         }
         result.Append($"\n 总金额：{orderDetailForMerch.ShoppingCart.CartTotal}");
         return result.ToString();
     }
 
     [KernelFunction, Description("customer want to place an order")]
-    public static async Task<string> AddOrderByMerchIdAsync()
+    public  async Task<string> AddOrderByMerchIdAsync(bool isAsking)
     {
         var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
         using var  httpClient = CreateYesmealHttpClient();
@@ -159,18 +311,19 @@ public class PhoneCallPlugin
                 MerchId = merchId
             }));
         httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        var orderDetailResult = await GetMerchantOrderDetailAsync();
         var response = await httpClient.PostAsync("https://testapi.yesmeal.com/api/order/by/phonecall",httpContent)
             .ConfigureAwait(false);
 
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<AddOrderByMerchIdResponse>();
 
-        return $"下单成功，你的取餐号为：{result.MealCode}，请在{result.PickupTime}左右到店pick up，多谢。";
+        return $"{orderDetailResult} \n\n 下单成功，你的取餐号为：{result.MealCode}，请在{result.PickupTime}左右到店pick up，多谢。";
     }
 
     [KernelFunction, Description("customers have selected the respective product/food specifications.")]
     [return: Description("Please be careful not to alter the returned original text information")]
-    public static async Task<string> AddSpecificationsFoodsync([Description("Food items with specified specifications")]string specificationsName)
+    public   async Task<string> AddSpecificationsFoodsync([Description("Food items with specified specifications")]string specificationsName)
     {
         var askGptRequest = new AskGptRequest
         {
@@ -193,7 +346,10 @@ public class PhoneCallPlugin
                 }
             }
         };
-        var foodParameterMap = await AskGptAsync(askGptRequest);
+        var askGptResult = await AskGptAsync(askGptRequest);
+        var foodParameterMap = JsonConvert.DeserializeObject<FoodParameterMapDto>(askGptResult.Data.Response);
+        if (foodParameterMap == null && foodParameterMap.FoodId != Guid.Empty)
+            throw new Exception("Response mapping異常:" + askGptResult.Data.Response);
 
         var foodObj = merchFoodDic[foodParameterMap.FoodId.ToString()];
         if (foodObj != null)
@@ -228,13 +384,15 @@ public class PhoneCallPlugin
                 stringBuilder.Append("\n 请问你需要哪一个？");
                 return await Task.FromResult(stringBuilder.ToString());
             }
+
+            merchFoodDic = new Dictionary<string, MerchFoodDto>();
             return await Task.FromResult("好的，已帮你加入购物车。请问还需要其他吗？还是埋单吗？");
         }
 
         return await Task.FromResult("抱歉，系统开了小差，请再说多一次好吗？");
     }
 
-    private static async Task<MerchFoodDto> GetRecommendFoodAsync(Guid merchId, string foodName = null)
+    private   async Task<MerchFoodDto> GetRecommendFoodAsync(Guid merchId, string foodName = null)
     {
         return await AsyncUtils.SafeInvokeAsync<MerchFoodDto>(async () =>
         {
@@ -257,7 +415,7 @@ public class PhoneCallPlugin
         }, nameof(GetRecommendFoodAsync));
     }
 
-    private static async Task<string> Translation(string content)
+    private   async Task<string> Translation(string content)
     {
         using var  httpClient = CreateSmartiesHttpClient();
 
@@ -275,9 +433,9 @@ public class PhoneCallPlugin
         return await response.Content.ReadAsStringAsync();
     }
 
-    private static async Task<FoodParameterMapDto> AskGptAsync(AskGptRequest request)
+    private   async Task<AskGptResponse> AskGptAsync(AskGptRequest request)
     {
-        return await AsyncUtils.SafeInvokeAsync<FoodParameterMapDto>(async () =>
+        return await AsyncUtils.SafeInvokeAsync<AskGptResponse>(async () =>
         {
             using var httpClient = CreateSmartiesHttpClient();
             var httpContent = new StringContent(JsonConvert.SerializeObject(request));
@@ -288,14 +446,11 @@ public class PhoneCallPlugin
             response.EnsureSuccessStatusCode();
 
             var askGptResult = await response.Content.ReadFromJsonAsync<AskGptResponse>();
-            var foodParamMap = JsonConvert.DeserializeObject<FoodParameterMapDto>(askGptResult.Data.Response);
-            if (foodParamMap != null && foodParamMap.FoodId != Guid.Empty)
-                return foodParamMap;
-            throw new Exception("Response mapping異常:" + askGptResult.Data.Response);
+            return askGptResult;
         },nameof(AskGptAsync));
     }
 
-    private static async Task<string> AddToCartAsync(Guid merchId, MerchFoodDto merchFood,int quantity,
+    private   async Task<string> AddToCartAsync(Guid merchId, MerchFoodDto merchFood,int quantity,
         List<FoodParameterDto>? foodParameters = null)
     {
         using var httpClient = CreateYesmealHttpClient();
@@ -306,7 +461,7 @@ public class PhoneCallPlugin
                 MerchId = merchId,
                 FoodId = merchFood.Id,
                 Quantity = quantity,
-                FoodParameters = foodParameters,
+                FoodParameters = foodParameters ?? new List<FoodParameterDto>(),
                 DeliveryType = 0,
                 ShouldThrowGroupifyError = false,
                 ShouldExcludePickupOrFallbackMerchants = false,
@@ -321,7 +476,7 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("empty/clear/remove the shoppingcart")]
-    public static async Task EmptyCartAsync()
+    public   async Task EmptyCartAsync()
     {
         using var  httpClient = CreateYesmealHttpClient();
 
@@ -339,7 +494,88 @@ public class PhoneCallPlugin
         response.EnsureSuccessStatusCode();
     }
 
-    private static HttpClient CreateYesmealHttpClient(Dictionary<string, string>? headers = null)
+    private   AskGptRequest GetStatementOrCommandIntent(string question)
+    {
+        return new AskGptRequest
+        {
+            Model = 6,
+            ResponseFormat = new ResponseFormat { Type = "json_object" },
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content = "你是一位对中文理解深入的人工智能。请根据用户的提问来判断，它属于问题咨询还是命令操作。" +
+                              "如果是问题咨询，通常问题咨询会包含疑问词但不明确要求执行动作的情况，那么这个不明确要求执行动作也要填充ActionContent。" +
+                              "对于没有明显动作，属于咨询“活动”，“推荐菜”，“停车场”，“地址”的提问，也请把这个名词填充到ActionContent。" +
+                              "对于简短的动词提问，如‘同意’，‘需要’，‘确认’，‘好’，‘不要’，‘拒绝’，请将提问内容填充到 AnswerPhrase。" +
+                              "对于语句中含有“吗”，“是不是”的词语，都属于问题咨询，IsAsking都要设置true。" +
+                              "如果提问明确要获取一些信息，但是没直接使用疑问词，他就属于命令操作，IsAsking都要设置false。" +
+                              "一些动词开头的提问，属于命令操作，比如“查询”，“下单”，“落单”。切记下单不可能和菜品名称同时存在，因此你不要加入与餐饮无关的内容。" +
+                              "输出的格式必须符合以下 JSON 结构：{\"IsAsking\": \"\", \"ActionContent\": \"\", \"AnswerPhrase\": \"\"}。"
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = "输入:" + question
+                }
+            }
+        };
+    }
+
+    private AskGptRequest GetStandardIntentMap(string input, string context=null)
+    {
+        return new AskGptRequest
+        {
+            Model = 6,
+            ResponseFormat = new ResponseFormat { Type = "json_object" },
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content = "你是一个对餐饮有高度理解力的人工智能,我希望根据输入的内容和下面这个JSON对象做一个匹配；" +
+                              "如果输入内容匹配到加入购物车或者删除购物车商品，请把输入的内容进行拆分，拆出商品/食品名称填充到foodName；" +
+                              "你的输出的格式也一定是这个JSON里面的某个对象，只能输出你匹配度最高的一个，如果没有任何一个intent可以匹配，那么返回的intent里面设置''；同时请你结合上下文来分析；" +
+                              $"匹配JSON：{JsonConvert.SerializeObject(GetStandardIntentInfo())};"
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = $"输入：{input};上下文内容：{context}"
+                }
+            }
+        };
+    }
+
+    private AskGptRequest GetPhraseIntentMap(string input, string context)
+    {
+        return new AskGptRequest
+        {
+            Model = 6,
+            ResponseFormat = new ResponseFormat { Type = "json_object" },
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content = "你是一个对餐厅下单有高度理解力的人工智能,我希望你能够根据用户输入的内容和上下文内容来推断出顾客想要做的动作，" +
+                              "顾客做的动作仅限以下动作JSON里面的intent，请你抽取所有intent做一个匹配," +
+                              "你返回的的格式必须符合这个JSON 结构：{\"IsPositive\":\"\",\"IntentValue\":{\"intent\": \"\", \"value\": \"\", \"FoodName\":\"\"}}。" +
+                              "当你抽取了Intent，对应的Value也能匹配到，如果返回的对象里面Value为''，Intent也是一定为''。" +
+                              "如果用户的输入是属于肯定词语，则IsPositive设置为true，否则为false，IntentValue里面的内容和动作JSON里面的对象匹配；" +
+                              $"动作JSON：{JsonConvert.SerializeObject(GetStandardIntentInfo())}"
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = $"输入:{input}；上下文内容:{context}"
+                }
+            }
+        };
+    }
+
+    private   HttpClient CreateYesmealHttpClient(Dictionary<string, string>? headers = null)
     {
         var httpClient = _httpClientFactory.CreateClient();
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_thirdPartyTokenOptions.Yesmeal}");
@@ -350,7 +586,7 @@ public class PhoneCallPlugin
         return httpClient;
     }
 
-    private static HttpClient CreateSmartiesHttpClient()
+    private   HttpClient CreateSmartiesHttpClient()
     {
         var httpClient = _httpClientFactory.CreateClient();
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_thirdPartyTokenOptions.Smarties}");

@@ -14,6 +14,7 @@ using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Models.Storage;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Plugins.Utils;
+using CopilotChat.WebApi.Plugins.Yesmeal;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
 using Microsoft.AspNetCore.SignalR;
@@ -286,9 +287,9 @@ public class ChatPlugin
         chatContext[TokenUtils.GetFunctionKey("SystemMetaPrompt")] = TokenUtils.GetContextMessagesTokenCount(metaPrompt).ToString(CultureInfo.CurrentCulture);
 
         // Stream the response to the client
-        var promptView = new BotResponsePrompt(systemInstructions, audience, userIntent, memoryText, allowedChatHistory, metaPrompt);
+        var promptView = new BotResponsePrompt(systemInstructions, audience, userIntent, string.Empty, allowedChatHistory, metaPrompt);
 
-        return await this.HandleBotResponseAsync(chatId, userId, chatContext, promptView, citationMap.Values.AsEnumerable(), cancellationToken);
+        return await this.HandleBotResponseAsync(chatId, userId, chatContext, promptView, new List<CitationSource>(), cancellationToken, userAsking: userMessage.Content);
     }
 
     /// <summary>
@@ -323,12 +324,13 @@ public class ChatPlugin
         KernelArguments chatContext,
         BotResponsePrompt promptView,
         IEnumerable<CitationSource>? citations,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string userAsking = null)
     {
         // Get bot response and stream to client
         await this.UpdateBotResponseStatusOnClientAsync(chatId, "Generating bot response", cancellationToken);
         CopilotChatMessage chatMessage = await AsyncUtils.SafeInvokeAsync(
-            () => this.StreamResponseToClientAsync(chatId, userId, promptView, cancellationToken, citations), nameof(StreamResponseToClientAsync));
+            () => this.StreamResponseToClientAsync(chatId, userId, promptView, cancellationToken, citations,
+                userAsking: userAsking), nameof(StreamResponseToClientAsync));
 
         // Save the message into chat history
         await this.UpdateBotResponseStatusOnClientAsync(chatId, "Saving message to chat history", cancellationToken);
@@ -633,16 +635,22 @@ public class ChatPlugin
         string userId,
         BotResponsePrompt prompt,
         CancellationToken cancellationToken,
-        IEnumerable<CitationSource>? citations = null)
+        IEnumerable<CitationSource>? citations = null, string userAsking = null)
     {
         // Create the stream
         var chatCompletion = this._kernel.GetRequiredService<IChatCompletionService>();
-        var stream =
-            chatCompletion.GetStreamingChatMessageContentsAsync(
-                prompt.MetaPromptTemplate,
-                this.CreateChatRequestSettings(),
-                this._kernel,
-                cancellationToken);
+        var intentResult = await _kernel.InvokeAsync(nameof(PhoneCallPlugin), "IntentSpot", new()
+        {
+            { "question", userAsking },
+            { "ChatHistory", prompt.ChatHistory }
+        },cancellationToken);
+
+        // var stream =
+        //     chatCompletion.GetStreamingChatMessageContentsAsync(
+        //         prompt.MetaPromptTemplate,
+        //         this.CreateChatRequestSettings(),
+        //         this._kernel,
+        //         cancellationToken);
 
         // Create message on client
         var chatMessage = await this.CreateBotMessageOnClient(
@@ -655,12 +663,13 @@ public class ChatPlugin
         );
 
         // Stream the message to the client
-        await foreach (var contentPiece in stream)
-        {
-            chatMessage.Content += contentPiece;
-            await this.UpdateMessageOnClient(chatMessage, cancellationToken);
-        }
-
+        // await foreach (var contentPiece in stream)
+        // {
+        //     chatMessage.Content += contentPiece;
+        //     await this.UpdateMessageOnClient(chatMessage, cancellationToken);
+        // }
+        chatMessage.Content += intentResult;
+        await this.UpdateMessageOnClient(chatMessage, cancellationToken);
         return chatMessage;
     }
 
