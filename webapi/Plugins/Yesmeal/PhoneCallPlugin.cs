@@ -7,6 +7,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using CopilotChat.WebApi.Dtos;
 using CopilotChat.WebApi.Models.Request;
@@ -36,10 +37,10 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("spot the intent")]
-    public   async Task<string> IntentSpotAsync(KernelArguments arguments)
+    public async Task<string> IntentSpotAsync(KernelArguments arguments)
     {
         if (arguments["question"] == null) return "抱歉，系统暂时开了小差，请重新发送消息～";
-        var chatHistory = arguments["ChatHistory"].ToString();
+        var latestChatHistory = string.Join(",", GetLatestChatHistory(arguments["ChatHistory"].ToString()));
         var question = arguments["question"].ToString();
 
         if (merchFoodDic.Values.Any(x => x.ParameterGroups.Exists(t => !t.IsAnswer)))
@@ -47,108 +48,53 @@ public class PhoneCallPlugin
             Console.WriteLine("has SpecificationsFoods need to select");
             return await AddSpecificationsFoodsync(question);
         }
-        Console.WriteLine("normal");
-        var statementOrCommandIntentResult = await AskGptAsync(GetStatementOrCommandIntent(question));
-        if (statementOrCommandIntentResult.Data.Response == null)
-            return  await Task.FromResult("抱歉，无法识别您的意图，请再换一种方式提问好吗？");
 
-        var askIntentDto = JsonConvert.DeserializeObject<AskIntentDto>(statementOrCommandIntentResult.Data.Response.Replace("\n","").Replace(" ",""));
-        if (!string.IsNullOrWhiteSpace(askIntentDto.AnswerPhrase))
+        var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(question, latestChatHistory));
+        return await PolishQuestionIntentAsync(question, questionIntentResponse.Data.Response, latestChatHistory);
+    }
+
+    private async Task<string> PolishQuestionIntentAsync(string question, string questionIntent, string chatHistory)
+    {
+        var intentValue = questionIntent.Split(':')[1]?.Trim();
+        var resultTmp = string.Empty;
+        switch (intentValue)
         {
-            var askPhraseIntentResult = await AskGptAsync(GetPhraseIntentMap(askIntentDto.AnswerPhrase, chatHistory));
-            var phraseIntentValue = JsonConvert.DeserializeObject<PhraseIntentValueDto>(askPhraseIntentResult.Data.Response);
-            if (!phraseIntentValue.IsPositive)
-            {
-
-                return "好的，请问还有什么可以帮到你吗？";
-            }
-            var result= await CallIntentFunction(false, phraseIntentValue.IntentValue);
-            return PolishIntentAnswer(phraseIntentValue.IntentValue, result);
+            case "NONE":
+                var questionIntentResponse = await AskGptAsync(GetFoodAssistantAnswerRequest(question));
+                return questionIntentResponse.Data.Response;
+            case "AskForAddress":
+                resultTmp = $"你好，地址是：{await GetMerchantAddress(false)}";
+                break;
+            case "GetActivity":
+                resultTmp = $"活动内容如下：\n {await GetMerchantCampaign(false)} \n 请问还有什么可以帮到你吗？";
+                break;
+            case "CheckParkingLotExists":
+                resultTmp = $"你好：\n {await GetMerchantParkingInfo(false)} \n 请问还有什么可以帮到你吗？";
+                break;
+            case "IntroducingRecommendedDishes":
+                resultTmp = await GetRecommendDishWithoutSpecificCategoryName(false);
+                break;
+            case "AddOrder":
+                resultTmp = await AddOrderByMerchIdAsync(false);
+                break;
+            case "AskFoodDetail":
+                var askFoodDetailResponse = await AskGptAsync(GetFoodDetailRequest(question, chatHistory));
+                var foodSpotDtoForFoodDetail =
+                    JsonConvert.DeserializeObject<FoodSpotDto>(askFoodDetailResponse.Data.Response);
+                resultTmp = await AskForFoodDetail(foodSpotDtoForFoodDetail.FoodName,
+                    foodSpotDtoForFoodDetail.Quantity.GetValueOrDefault().ToString(),
+                    foodSpotDtoForFoodDetail.SpecialRequirement, true);
+                break;
+            case "AddCart":
+                var askAddCartResponse = await AskGptAsync(GetFoodDetailRequest(question, chatHistory));
+                var foodSpotDtoForCart = JsonConvert.DeserializeObject<FoodSpotDto>(askAddCartResponse.Data.Response);
+                resultTmp = await AskForFoodDetail(foodSpotDtoForCart.FoodName,
+                    foodSpotDtoForCart.Quantity.GetValueOrDefault().ToString(), foodSpotDtoForCart.SpecialRequirement,
+                    false);
+                break;
         }
 
-        var askIntentMapResult = await AskGptAsync(GetStandardIntentMap(string.IsNullOrWhiteSpace(askIntentDto.ActionContent) ? question:askIntentDto.ActionContent, chatHistory));
-        if (askIntentMapResult.Data.Response == null)
-            return await Task.FromResult("抱歉，无法识别您的意图，请再换一种方式提问好吗？");
-        var intentValue = JsonConvert.DeserializeObject<IntentValueDto>(askIntentMapResult.Data.Response);
-
-        return await CallIntentFunction(askIntentDto.IsAsking, intentValue);
-    }
-
-    private List<IntentValueDto> GetStandardIntentInfo()
-    {
-        return new List<IntentValueDto>
-        {
-            new() { Intent = "地址", Value = 0 },
-            new() { Intent = "活动", Value = 1 },
-            new() { Intent = "停车场", Value = 2 },
-            new() { Intent = "推荐菜", Value = 3 },
-            new() { Intent = "下单", Value = 4 },
-            new() { Intent = "加入购物车", Value = 5, FoodName = "" },
-            new() { Intent = "删除商品", Value = 6, FoodName = "" },
-            new() { Intent = "订单详情", Value = 7 }
-        };
-    }
-
-    private List<IntentValueDto> GetContextAnswerPhrase()
-    {
-        return new List<IntentValueDto>
-        {
-            new() { Intent = "同意", Value = 0 },
-            new() { Intent = "确认", Value = 1 },
-            new() { Intent = "好的", Value = 2 },
-            new() { Intent = "不要了", Value = 3 },
-            new() { Intent = "获取订单详情", Value = 7 }
-        };
-    }
-
-    private  string PolishIntentAnswer(IntentValueDto intentValue,  string answer)
-    {
-        switch (intentValue.Value)
-        {
-            case 0:
-                return $"你好，地址是：{answer}";
-            case 1:
-                return $"活动内容如下：\n {answer} \n 请问还有什么可以帮到你吗？";
-            case 2:
-                return "你好，暂时没停车场哦，请问还有什么可以帮到你？";
-            case 3:
-                return answer;
-            case 4:
-                return answer;
-            case 5:
-                return answer;
-            case 6:
-                return "暂不支持的操作";
-            case 7:
-                return answer;
-            default:
-                return "识别不到的意图";
-        }
-    }
-
-    private async Task<string> CallIntentFunction(bool isAsking, IntentValueDto intentValue)
-    {
-        switch (intentValue.Value)
-        {
-            case 0:
-                return await GetMerchantAddress(isAsking);
-            case 1:
-                return await GetMerchantCampaign(isAsking);
-            case 2:
-                return await GetMerchantParkingInfo(isAsking);
-            case 3:
-                return await GetRecommendDishWithoutSpecificCategoryName(isAsking);
-            case 4:
-                return await AddOrderByMerchIdAsync(isAsking);
-            case 5:
-                return await AskForFoodDetail(intentValue.FoodName, "1", "", isAsking);
-            case 6:
-                return "暂不支持的操作";
-            case 7:
-                return await GetMerchantOrderDetailAsync();
-            default:
-                return "识别不到的意图";
-        }
+        return resultTmp;
     }
 
     [KernelFunction, Description("Get campaign/activities of merchant，restaurant,")]
@@ -494,7 +440,67 @@ public class PhoneCallPlugin
         response.EnsureSuccessStatusCode();
     }
 
-    private   AskGptRequest GetStatementOrCommandIntent(string question)
+    private AskGptRequest GetQuestionIntentRequest(string question, string chatHistory)
+    {
+        return new AskGptRequest
+        {
+            Model = 6,
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content = "You are a helpful assistant for intent classification,you can understand cantonese and mandarin, you can classify the user Text into one of these intents, " +
+                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\"],  " +
+                              "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
+                              "These are the positive examples: Samples:[\"你好\",\"中国有哪些特色美食\",\"如何学习编程\",\"谈谈你对中美关系的理解\"] Intent: NONE " +
+                              "\n\n Samples:[\"餐厅地址在哪里\",\"请问\\\"店铺\\\"在哪里\"] Intent: AskForAddress " +
+                              "\n\n Samples:[\"获取活动\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
+                              "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\"] Intent: CheckParkingLotExists " +
+                              "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\"] Intent: IntroducingRecommendedDishes " +
+                              "\n\n Samples:[\"下单\",\"埋单\",\"落单\",\"结算\"] Intent: AddOrder " +
+                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"来个牛肉饭\"] Intent: AddCart " +
+                              "\n\n Samples:[\"有无蛋炒饭\",\"三明治多少钱\",\"烧鸭怎么卖\"] Intent: AskFoodDetail " +
+                              "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
+                              "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
+                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\"] Intent: NONE"
+                },
+                new()
+                {
+                    Role = "system",
+                    Content = $"上下文:{chatHistory}"
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = $"输入:{question}"
+                }
+            }
+        };
+    }
+
+    private AskGptRequest GetFoodAssistantAnswerRequest(string input)
+    {
+        return new AskGptRequest
+        {
+            Model = 6,
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content = "你是一个对餐厅下单有高度理解力的人工智能,我希望你能够根据用户所说的内容来作出专业的回答。你的回答一定是你的原话，不需要加上“回复”，“回答”"
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = $"输入:{input}"
+                }
+            }
+        };
+    }
+
+    private AskGptRequest GetFoodDetailRequest(string input, string chatHistory)
     {
         return new AskGptRequest
         {
@@ -505,76 +511,65 @@ public class PhoneCallPlugin
                 new()
                 {
                     Role = "system",
-                    Content = "你是一位对中文理解深入的人工智能。请根据用户的提问来判断，它属于问题咨询还是命令操作。" +
-                              "如果是问题咨询，通常问题咨询会包含疑问词但不明确要求执行动作的情况，那么这个不明确要求执行动作也要填充ActionContent。" +
-                              "对于没有明显动作，属于咨询“活动”，“推荐菜”，“停车场”，“地址”的提问，也请把这个名词填充到ActionContent。" +
-                              "对于简短的动词提问，如‘同意’，‘需要’，‘确认’，‘好’，‘不要’，‘拒绝’，请将提问内容填充到 AnswerPhrase。" +
-                              "对于语句中含有“吗”，“是不是”的词语，都属于问题咨询，IsAsking都要设置true。" +
-                              "如果提问明确要获取一些信息，但是没直接使用疑问词，他就属于命令操作，IsAsking都要设置false。" +
-                              "一些动词开头的提问，属于命令操作，比如“查询”，“下单”，“落单”。切记下单不可能和菜品名称同时存在，因此你不要加入与餐饮无关的内容。" +
-                              "输出的格式必须符合以下 JSON 结构：{\"IsAsking\": \"\", \"ActionContent\": \"\", \"AnswerPhrase\": \"\"}。"
+                    Content = "你是一个对餐厅下单有高度理解力的人工智能,我希望你能够根据用户所说的内容来推断出顾客想要下单的菜品和菜品数量，" +
+                              "以及对菜品特别的要求，我也希望你能够理解并且能够匹配到菜单里面的产品，如果匹配不到就抽取你所理解的菜品名，" +
+                              "你的輸出格式一定要符合這個JSON: {\"foodName\": \"菜名\", \"quantity\": 2, \"specialRequirement\": \"走蔥\"}'"
                 },
-                new()
-                {
-                    Role = "user",
-                    Content = "输入:" + question
-                }
-            }
-        };
-    }
-
-    private AskGptRequest GetStandardIntentMap(string input, string context=null)
-    {
-        return new AskGptRequest
-        {
-            Model = 6,
-            ResponseFormat = new ResponseFormat { Type = "json_object" },
-            Messages = new List<AskSmartiesMessageDto>
-            {
                 new()
                 {
                     Role = "system",
-                    Content = "你是一个对餐饮有高度理解力的人工智能,我希望根据输入的内容和下面这个JSON对象做一个匹配；" +
-                              "如果输入内容匹配到加入购物车或者删除购物车商品，请把输入的内容进行拆分，拆出商品/食品名称填充到foodName；" +
-                              "你的输出的格式也一定是这个JSON里面的某个对象，只能输出你匹配度最高的一个，如果没有任何一个intent可以匹配，那么返回的intent里面设置''；同时请你结合上下文来分析；" +
-                              $"匹配JSON：{JsonConvert.SerializeObject(GetStandardIntentInfo())};"
+                    Content = $"上下文:{chatHistory}"
                 },
                 new()
                 {
                     Role = "user",
-                    Content = $"输入：{input};上下文内容：{context}"
+                    Content = $"输入:{input}"
                 }
             }
         };
     }
 
-    private AskGptRequest GetPhraseIntentMap(string input, string context)
+    private List<string> GetLatestChatHistory(string chatHistory)
     {
-        return new AskGptRequest
-        {
-            Model = 6,
-            ResponseFormat = new ResponseFormat { Type = "json_object" },
-            Messages = new List<AskSmartiesMessageDto>
-            {
-                new()
-                {
-                    Role = "system",
-                    Content = "你是一个对餐厅下单有高度理解力的人工智能,我希望你能够根据用户输入的内容和上下文内容来推断出顾客想要做的动作，" +
-                              "顾客做的动作仅限以下动作JSON里面的intent，请你抽取所有intent做一个匹配," +
-                              "你返回的的格式必须符合这个JSON 结构：{\"IsPositive\":\"\",\"IntentValue\":{\"intent\": \"\", \"value\": \"\", \"FoodName\":\"\"}}。" +
-                              "当你抽取了Intent，对应的Value也能匹配到，如果返回的对象里面Value为''，Intent也是一定为''。" +
-                              "如果用户的输入是属于肯定词语，则IsPositive设置为true，否则为false，IntentValue里面的内容和动作JSON里面的对象匹配；" +
-                              $"动作JSON：{JsonConvert.SerializeObject(GetStandardIntentInfo())}"
-                },
-                new()
-                {
-                    Role = "user",
-                    Content = $"输入:{input}；上下文内容:{context}"
-                }
-            }
-        };
-    }
+        if (string.IsNullOrWhiteSpace(chatHistory))
+            return new List<string>();
+        // 使用正则表达式提取聊天记录
+        Regex regex = new Regex(@"\[(.*?)\] (.*?): (.*)");
+        MatchCollection matches = regex.Matches(chatHistory);
 
+        // 存储匹配结果
+        var messages = new List<string>();
+
+        // 获取时间最新的3条聊天记录，并限制每条记录的最大长度
+        var sortedMatches = matches.Cast<Match>()
+            .Select(m => new
+            {
+                Timestamp = DateTime.Parse(m.Groups[1].Value),
+                Message = $"[{m.Groups[1].Value}] {m.Groups[2].Value}: {m.Groups[3].Value}"
+            })
+            .OrderByDescending(x => x.Timestamp)
+            .Take(2)
+            .ToList();
+
+        // 移除列表中的最后一条记录
+        if (sortedMatches.Count > 0)
+            sortedMatches.RemoveAt(0);
+
+        foreach (var match in sortedMatches)
+        {
+            string message = match.Message;
+            // 截断消息长度
+            if (message.Length > 150)
+            {
+                message = message.Substring(0, 150) + "...";
+            }
+
+            messages.Add(message);
+        }
+
+        messages.Reverse();
+        return messages;
+    }
     private   HttpClient CreateYesmealHttpClient(Dictionary<string, string>? headers = null)
     {
         var httpClient = _httpClientFactory.CreateClient();
