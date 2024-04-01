@@ -92,6 +92,9 @@ public class PhoneCallPlugin
                     foodSpotDtoForCart.Quantity.GetValueOrDefault().ToString(), foodSpotDtoForCart.SpecialRequirement,
                     false);
                 break;
+            case "OrderDetail":
+                resultTmp = await GetMerchantOrderDetailAsync();
+                break;
         }
 
         return resultTmp;
@@ -271,29 +274,39 @@ public class PhoneCallPlugin
     [return: Description("Please be careful not to alter the returned original text information")]
     public   async Task<string> AddSpecificationsFoodsync([Description("Food items with specified specifications")]string specificationsName)
     {
+        var categories = merchFoodDic.Values.SelectMany(x => x.ParameterGroups).SelectMany(x => x.ParameterItems).Select(x => x.Name).ToList();
         var askGptRequest = new AskGptRequest
         {
             Model = 6,
-            ResponseFormat = new ResponseFormat { Type = "json_object" },
             Messages = new List<AskSmartiesMessageDto>
             {
                 new()
                 {
-                    Role = "user",
-                    Content = "根据用户给的商品规格名称和商品JSON能匹配出对应的id和parameterItemId；" +
-                              $"商品JSON:{JsonConvert.SerializeObject(merchFoodDic)};" +
-                              "如果找到匹配项，输出的格式一定要是符合这个JSON：[{\"foodId\": \"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\", \"parameterItemId\":\"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\"}];" +
-                              "如果没有找到匹配项，则只需要返回[]，一定不要加入商品JSON不存在的id，确保程序能够正确地解析用户输入的规格名称，并从提供的 JSON 数据中查找匹配项;",
+                    Role = "system",
+                    Content = "You are a great helper in text classification, you can classify user text into one of these categories," +
+                              $"Categories: {JsonConvert.SerializeObject(categories)}," +
+                              " you SHOULD ONLY answer if you are very sure, otherwise reply ''category: NONE''.",
                 },
                 new()
                 {
-                    Role = "system",
-                    Content = "商品规格名称:" + specificationsName
+                    Role = "user",
+                    Content = "输入:" + specificationsName
                 }
             }
         };
         var askGptResult = await AskGptAsync(askGptRequest);
-        var foodParameterMap = JsonConvert.DeserializeObject<FoodParameterMapDto>(askGptResult.Data.Response);
+        if (string.IsNullOrWhiteSpace(askGptResult.Data.Response) || askGptResult.Data.Response.Contains("NONE"))
+        {
+            var questionIntentResponse = await AskGptAsync(GetFoodAssistantAnswerRequest(specificationsName));
+            merchFoodDic.Clear();
+            return questionIntentResponse.Data.Response;
+        }
+
+        var foodItemName = askGptResult.Data.Response.Split(":")[1];
+        var foodItem = merchFoodDic.Values.SelectMany(x => x.ParameterGroups).SelectMany(x => x.ParameterItems).FirstOrDefault(x => x.Name == foodItemName);
+        var food = merchFoodDic.Values.FirstOrDefault(x => x.ParameterGroups.Any(t => t.Id == foodItem.GroupId));
+        var foodParameterMap = new FoodParameterMapDto { FoodId = food.Id, ParameterItemId = foodItem.Id };
+
         if (foodParameterMap == null && foodParameterMap.FoodId != Guid.Empty)
             throw new Exception("Response mapping異常:" + askGptResult.Data.Response);
 
@@ -346,7 +359,7 @@ public class PhoneCallPlugin
             var httpContent = new StringContent(JsonConvert.SerializeObject(new RecommendSimilarFoodsRequest
             {
                 Keyword = foodName, MerchIds = new List<Guid> { merchId },
-                RecommendCount = 1
+                RecommendCount = 2
             }));
             httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
@@ -451,7 +464,7 @@ public class PhoneCallPlugin
                 {
                     Role = "system",
                     Content = "You are a helpful assistant for intent classification,you can understand cantonese and mandarin, you can classify the user Text into one of these intents, " +
-                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\"],  " +
+                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\"],  " +
                               "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
                               "These are the positive examples: Samples:[\"你好\",\"中国有哪些特色美食\",\"如何学习编程\",\"谈谈你对中美关系的理解\"] Intent: NONE " +
                               "\n\n Samples:[\"餐厅地址在哪里\",\"请问\\\"店铺\\\"在哪里\"] Intent: AskForAddress " +
@@ -461,6 +474,7 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"下单\",\"埋单\",\"落单\",\"结算\"] Intent: AddOrder " +
                               "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"来个牛肉饭\"] Intent: AddCart " +
                               "\n\n Samples:[\"有无蛋炒饭\",\"三明治多少钱\",\"烧鸭怎么卖\"] Intent: AskFoodDetail " +
+                              "\n\n Samples:[\"订单详情\",\"看看我买了什么\"] Intent: OrderDetail " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
                               "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\"] Intent: NONE"
