@@ -97,7 +97,7 @@ public class PhoneCallPlugin
                 {
                     resultTmp = await AskForFoodDetail(foodSpotDtoForCart.FoodName,
                         foodSpotDtoForCart.Quantity.GetValueOrDefault().ToString(),
-                        foodSpotDtoForCart.SpecialRequirement, false, IntentSource.AskAddCart);
+                        foodSpotDtoForCart.SpecialRequirement, false, IntentSource.AskAddCart, intentScenes);
                 }
                 else
                 {
@@ -198,7 +198,8 @@ public class PhoneCallPlugin
         [Description("the name of food")]string foodName,
         [Description("the quantity of food")]string quantity,
         [Description("the special comment of food")]string specialComment,
-        bool isAsking, IntentSource? intentSource = null)
+        bool isAsking, IntentSource? intentSource = null,
+        IntentScenes? intentScenes = null)
     {
         Console.WriteLine("hit the AskForFoodDetail:" + foodName);
 
@@ -206,7 +207,7 @@ public class PhoneCallPlugin
         {
             var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
 
-            if (intentSource == IntentSource.AskAddCart)
+            if (intentSource == IntentSource.AskAddCart && intentScenes == IntentScenes.Specification)
             {
                 var food = askFoodHistoryDic.Values.FirstOrDefault(x => x.Name.Contains(foodName));
 
