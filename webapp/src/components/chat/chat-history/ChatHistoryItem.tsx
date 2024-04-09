@@ -16,8 +16,6 @@ import {
     ChevronUp20Regular,
     Clipboard20Regular,
     ClipboardTask20Regular,
-    ThumbDislikeFilled,
-    ThumbLikeFilled,
 } from '@fluentui/react-icons';
 import React, { useState } from 'react';
 import { useChat } from '../../../libs/hooks/useChat';
@@ -28,7 +26,7 @@ import { DefaultChatUser, FeatureKeys } from '../../../redux/features/app/AppSta
 import { Breakpoints, customTokens } from '../../../styles';
 import { timestampToDateString } from '../../utils/TextUtils';
 import { PlanViewer } from '../plan-viewer/PlanViewer';
-import { PromptDialog } from '../prompt-dialog/PromptDialog';
+// import { PromptDialog } from '../prompt-dialog/PromptDialog';
 import { TypingIndicator } from '../typing-indicator/TypingIndicator';
 import * as utils from './../../utils/TextUtils';
 import { ChatHistoryDocumentContent } from './ChatHistoryDocumentContent';
@@ -119,7 +117,7 @@ export const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ message, messa
 
     const isDefaultUser = message.userId === DefaultChatUser.id;
     const isMe = isDefaultUser || (message.authorRole === AuthorRoles.User && message.userId === activeUserInfo?.id);
-    const isBot = message.authorRole === AuthorRoles.Bot;
+    const isBot = message.authorRole != AuthorRoles.Bot;
     const user = isDefaultUser
         ? DefaultChatUser
         : chat.getChatUserById(message.userName, selectedId, conversations[selectedId].users);
@@ -187,7 +185,7 @@ export const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ message, messa
                 <div className={classes.header}>
                     {!isMe && <Text weight="semibold">{fullName}</Text>}
                     <Text className={classes.time}>{timestampToDateString(message.timestamp, true)}</Text>
-                    {isBot && <PromptDialog message={message} />}
+                    {/* {isBot && <PromptDialog message={message} />} */}
                     {isBot && message.prompt && (
                         <Tooltip content={messagedCopied ? 'Copied' : 'Copy text'} relationship="label">
                             <Button
@@ -227,12 +225,7 @@ export const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ message, messa
                     </div>
                 )}
             </div>
-            {features[FeatureKeys.RLHF].enabled && message.userFeedback === UserFeedback.Positive && (
-                <ThumbLikeFilled color="gray" />
-            )}
-            {features[FeatureKeys.RLHF].enabled && message.userFeedback === UserFeedback.Negative && (
-                <ThumbDislikeFilled color="gray" />
-            )}
+           
         </div>
     );
 };

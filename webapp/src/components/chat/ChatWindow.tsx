@@ -16,7 +16,7 @@ import {
     tokens,
     Tooltip,
 } from '@fluentui/react-components';
-import { Edit24Filled, EditRegular, Map16Regular, Person16Regular } from '@fluentui/react-icons';
+import { Edit24Filled, EditRegular } from '@fluentui/react-icons';
 import React, { useState } from 'react';
 import { useAppSelector } from '../../redux/app/hooks';
 import { RootState } from '../../redux/app/store';
@@ -149,39 +149,6 @@ export const ChatWindow: React.FC = () => {
                         <Tab data-testid="chatTab" id="chat" value="chat" aria-label="Chat Tab" title="Chat Tab">
                             Chat
                         </Tab>
-                        <Tab
-                            data-testid="documentsTab"
-                            id="documents"
-                            value="documents"
-                            aria-label="Documents Tab"
-                            title="Documents Tab"
-                        >
-                            Documents
-                        </Tab>
-                        {features[FeatureKeys.PluginsPlannersAndPersonas].enabled && (
-                            <>
-                                <Tab
-                                    data-testid="plansTab"
-                                    id="plans"
-                                    value="plans"
-                                    icon={<Map16Regular />}
-                                    aria-label="Plans Tab"
-                                    title="Plans Tab"
-                                >
-                                    Plans
-                                </Tab>
-                                <Tab
-                                    data-testid="personaTab"
-                                    id="persona"
-                                    value="persona"
-                                    icon={<Person16Regular />}
-                                    aria-label="Persona Tab"
-                                    title="Persona Tab"
-                                >
-                                    Persona
-                                </Tab>
-                            </>
-                        )}
                     </TabList>
                 </div>
                 <div className={classes.controls}>
