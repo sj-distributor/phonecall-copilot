@@ -247,7 +247,7 @@ public class PhoneCallPlugin
                 var askFoodIntent = await AskGptAsync(this.GetFoodSpecificationOrSpecialCommentRequest(specialComment, chatHistory));
                 var intentValue = askFoodIntent.Data.Response.Split(':')[1].Trim();
                 if (intentValue == "Specification" && recommendFood.ParameterGroups.Count == 0)
-                    return await Task.FromResult($"查询到{recommendFood.Name} 不是多规格商品,要按默认加入购物车吗？");
+                    return await Task.FromResult($"查询到{recommendFood.Name} 不是多规格商品,需要正常帮你加入购物车吗？");
 
                 if (intentValue == "Specification" && recommendFood.ParameterGroups.Count > 0)
                 {
