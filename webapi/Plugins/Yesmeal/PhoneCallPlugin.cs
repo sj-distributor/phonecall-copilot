@@ -5,20 +5,15 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using CopilotChat.WebApi.Dtos;
 using CopilotChat.WebApi.Models.Request;
 using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Plugins.Utils;
-using CopilotChat.WebApi.Storage;
-using DocumentFormat.OpenXml.Office.CustomUI;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
 using Newtonsoft.Json;
 
 namespace CopilotChat.WebApi.Plugins.Yesmeal;
@@ -29,7 +24,7 @@ public class PhoneCallPlugin
     private ThirdPartyTokenOptions _thirdPartyTokenOptions;
     private static Dictionary<string, MerchFoodDto> specificationFoodDic = new Dictionary<string, MerchFoodDto>();
     private static Dictionary<string, MerchFoodDto> askFoodHistoryDic = new Dictionary<string, MerchFoodDto>();
-
+    private static List<string> specialComments = new List<string>();
     public PhoneCallPlugin(IHttpClientFactory httpClientFactory,
         IOptions<ThirdPartyTokenOptions> thirdPartyTokenOptions)
     {
@@ -41,7 +36,10 @@ public class PhoneCallPlugin
     public async Task<string> IntentSpotAsync(KernelArguments arguments)
     {
         if (arguments["question"] == null) return "抱歉，系统暂时开了小差，请重新发送消息～";
-        var latestChatHistory = string.Join(",", GetLatestChatHistory(arguments["ChatHistory"].ToString()));
+        var latestChatHistory = arguments["ChatHistory"].ToString();
+        if (latestChatHistory.Length > 150)
+            latestChatHistory = latestChatHistory.Substring(0, 150) + "...";
+
         var question = arguments["question"].ToString();
 
         if (specificationFoodDic.Values.Any(x => x.ParameterGroups.Exists(t => !t.IsAnswer)))
@@ -65,7 +63,7 @@ public class PhoneCallPlugin
                 if (intentScenes == IntentScenes.Specification)
                     specificationFoodDic.Clear();
 
-                var questionIntentResponse = await AskGptAsync(GetFoodAssistantAnswerRequest(question));
+                var questionIntentResponse = await AskGptAsync(GetFoodAssistantAnswerRequest(question, chatHistory));
                 return questionIntentResponse.Data.Response;
             case "AskForAddress":
                 resultTmp = $"你好，地址是：{await GetMerchantAddress(false)}";
@@ -84,20 +82,23 @@ public class PhoneCallPlugin
                 break;
             case "AskFoodDetail":
                 var askFoodDetailResponse = await AskGptAsync(GetFoodDetailRequest(question, chatHistory));
-                var foodSpotDtoForFoodDetail =
-                    JsonConvert.DeserializeObject<FoodSpotDto>(askFoodDetailResponse.Data.Response);
-                resultTmp = await AskForFoodDetail(foodSpotDtoForFoodDetail.FoodName,
-                    foodSpotDtoForFoodDetail.Quantity.GetValueOrDefault().ToString(),
+                var foodSpotDtoForFoodDetails = JsonConvert.DeserializeObject<List<FoodSpotDto>>(askFoodDetailResponse.Data.Response);
+
+                var foodSpotDtoForFoodDetail = foodSpotDtoForFoodDetails.FirstOrDefault();
+                resultTmp = await AskForFoodDetail(foodSpotDtoForFoodDetail.FoodName, foodSpotDtoForFoodDetail.Quantity.GetValueOrDefault().ToString(),
                     foodSpotDtoForFoodDetail.SpecialRequirement, true);
                 break;
             case "AddCart":
                 var askAddCartResponse = await AskGptAsync(GetFoodDetailRequest(question, chatHistory));
-                var foodSpotDtoForCart = JsonConvert.DeserializeObject<FoodSpotDto>(askAddCartResponse.Data.Response);
+                var foodSpotDtoForCarts = JsonConvert.DeserializeObject<List<FoodSpotDto>>(askAddCartResponse.Data.Response);
+
+                var foodSpotDtoForCart = foodSpotDtoForCarts.FirstOrDefault();
                 if (foodSpotDtoForCart.FoodName != null)
                 {
                     resultTmp = await AskForFoodDetail(foodSpotDtoForCart.FoodName,
                         foodSpotDtoForCart.Quantity.GetValueOrDefault().ToString(),
-                        foodSpotDtoForCart.SpecialRequirement, false, IntentSource.AskAddCart, intentScenes);
+                        foodSpotDtoForCart.SpecialRequirement, false, IntentSource.AskAddCart, intentScenes,
+                        chatHistory);
                 }
                 else
                 {
@@ -170,7 +171,7 @@ public class PhoneCallPlugin
         var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
         var FoodCategory = new[] { "牛肉", "豬肉", "雞肉", "麵類", "粥" };
         var random = new Random();
-        int randomNumber = random.Next(1, 6); // 生成1到5之间的随机数
+        var randomNumber = random.Next(1, 6); // 生成1到5之间的随机数
         var recommendFood = await GetRecommendFoodAsync(merchId, foodName: FoodCategory[randomNumber - 1]);
         if (recommendFood == null)
             return await Task.FromResult("今天暂无推荐菜哦。请问还有什么可以帮到你？");
@@ -193,13 +194,12 @@ public class PhoneCallPlugin
         return await Task.FromResult(resultTemplate);
     }
 
-    [KernelFunction, Description("customer want to eat or order specific dish name, for example, milk, tea, rice, sandwich, chicken chop, pork chop, lunch meat, egg, fish, ham, noodles, porridge, vegetable")]
-    public async Task<string> AskForFoodDetail(
+     public async Task<string> AskForFoodDetail(
         [Description("the name of food")]string foodName,
         [Description("the quantity of food")]string quantity,
         [Description("the special comment of food")]string specialComment,
         bool isAsking, IntentSource? intentSource = null,
-        IntentScenes? intentScenes = null)
+        IntentScenes? intentScenes = null, string chatHistory = null)
     {
         Console.WriteLine("hit the AskForFoodDetail:" + foodName);
 
@@ -235,6 +235,21 @@ public class PhoneCallPlugin
 
             var recommendFood = await GetRecommendFoodAsync(merchId, foodName);
             if (recommendFood == null) return $"暂无{foodName},请换一个好吗？";
+
+            if (!string.IsNullOrWhiteSpace(specialComment))
+            {
+                //如果当前商品是没规格的，而specialComment又是含有规格的意思，那么就要提示用户，当前商品是单规格商品，作为specialComment传递即可
+                //如果当前商品是多规格的，而specialComment又是含有规格的意思，那么先要hit中是哪个规格，设置 foodGroupParameter.IsAnswer = foodItemParameter.IsSelected = true;
+                var askFoodIntent = await AskGptAsync(this.GetFoodSpecificationOrSpecialCommentRequest(specialComment, chatHistory));
+                var intentValue = askFoodIntent.Data.Response.Split(':')[1].Trim();
+                if (intentValue == "Specification" && recommendFood.ParameterGroups.Count == 0)
+                    return await Task.FromResult($"查询到{recommendFood.Name} 不是多规格商品,要按默认加入购物车吗？");
+
+                if (intentValue == "Specification" && recommendFood.ParameterGroups.Count > 0)
+                {
+                    return await HandleSpecialCommentWhenBelongSpecificationAsync(recommendFood, specialComment, merchId);
+                }
+            }
 
             askFoodHistoryDic[recommendFood.Id.ToString()] = recommendFood;
             if (recommendFood.ParameterGroups.Count == 0)
@@ -314,26 +329,8 @@ public class PhoneCallPlugin
     public async Task<string> AddSpecificationsFoodsync(string specificationsName, string latestChatHistory)
     {
         var categories = specificationFoodDic.Values.SelectMany(x => x.ParameterGroups).SelectMany(x => x.ParameterItems).Select(x => x.Name).ToList();
-        var askGptRequest = new AskGptRequest
-        {
-            Model = 6,
-            Messages = new List<AskSmartiesMessageDto>
-            {
-                new()
-                {
-                    Role = "system",
-                    Content = "You are a great helper in text classification, you can classify user text into one of these categories," +
-                              $"Categories: {JsonConvert.SerializeObject(categories)}," +
-                              " you SHOULD ONLY answer if you are very sure, otherwise reply ''category: NONE''.",
-                },
-                new()
-                {
-                    Role = "user",
-                    Content = "输入:" + specificationsName
-                }
-            }
-        };
-        var askGptResult = await AskGptAsync(askGptRequest);
+        var askGptResult = await AskGptAsync(GetSpecificationsRequest(specificationsName, categories));
+
         if (string.IsNullOrWhiteSpace(askGptResult.Data.Response) || askGptResult.Data.Response.Contains("NONE"))
         {
             var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(specificationsName, latestChatHistory));
@@ -341,7 +338,7 @@ public class PhoneCallPlugin
         }
 
         var foodItemName = askGptResult.Data.Response.Split(":")[1];
-        var foodItem = specificationFoodDic.Values.SelectMany(x => x.ParameterGroups).SelectMany(x => x.ParameterItems).FirstOrDefault(x => x.Name.Trim() == foodItemName.Trim());
+        var foodItem = specificationFoodDic.Values.SelectMany(x => x.ParameterGroups).SelectMany(x => x.ParameterItems).FirstOrDefault(x => x.Name.Trim().Contains(foodItemName.Trim()));
         var food = specificationFoodDic.Values.FirstOrDefault(x => x.ParameterGroups.Any(t => t.Id == foodItem.GroupId));
         var foodParameterMap = new FoodParameterMapDto { FoodId = food.Id, ParameterItemId = foodItem.Id };
 
@@ -462,6 +459,7 @@ public class PhoneCallPlugin
                 DeliveryType = 0,
                 ShouldThrowGroupifyError = false,
                 ShouldExcludePickupOrFallbackMerchants = false,
+
             }));
         httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
@@ -515,7 +513,7 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"订单详情\",\"看看我买了什么\"] Intent: OrderDetail " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
-                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\"] Intent: NONE"
+                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\"] Intent: NONE"
                 },
                 new()
                 {
@@ -531,7 +529,7 @@ public class PhoneCallPlugin
         };
     }
 
-    private AskGptRequest GetFoodAssistantAnswerRequest(string input)
+    private AskGptRequest GetFoodSpecificationOrSpecialCommentRequest(string input,string chatHistory)
     {
         return new AskGptRequest
         {
@@ -541,31 +539,12 @@ public class PhoneCallPlugin
                 new()
                 {
                     Role = "system",
-                    Content = "你是一个对餐厅下单有高度理解力的人工智能,我希望你能够根据用户所说的内容来作出专业的回答。你的回答一定是你的原话，同时要简短精炼，不需要加上“回复”，“回答”。"
-                },
-                new()
-                {
-                    Role = "user",
-                    Content = $"输入:{input}"
-                }
-            }
-        };
-    }
-
-    private AskGptRequest GetFoodDetailRequest(string input, string chatHistory)
-    {
-        return new AskGptRequest
-        {
-            Model = 6,
-            ResponseFormat = new ResponseFormat { Type = "json_object" },
-            Messages = new List<AskSmartiesMessageDto>
-            {
-                new()
-                {
-                    Role = "system",
-                    Content = "你是一个对餐厅下单有高度理解力的人工智能,我希望你能够根据用户所说的内容来推断出顾客想要下单的菜品和菜品数量，" +
-                              "以及对菜品特别的要求，我也希望你能够理解并且能够匹配到菜单里面的产品，如果匹配不到就抽取你所理解的菜品名，" +
-                              "你的輸出格式一定要符合這個JSON: {\"foodName\": \"菜名\", \"quantity\": 2, \"specialRequirement\": \"走蔥\"}"
+                    Content = "You are a helpful assistant for intent classification,you can understand cantonese and mandarin, you can classify the user Text into one of these intents, " +
+                              "Intents: [\"NONE\",\"Specification\",\"SpecialComment\"],  " +
+                              "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
+                              "These are the examples:" +
+                              "\n\n Samples:[\"搭配意粉\",\"中份\",\"小份\",\"大份\",\"配咖啡\",\"红茶\",\"冷饮\",\"热饮\",\"大杯\",\"白饭\"] Intent: Specification " +
+                              "\n\n Samples:[\"咸一点\",\"辣一点\",\"加辣\",\"走葱\",\"甜一点\",\"咸一点\",\"加多个手套\",\"两个筷子\"] Intent: SpecialComment "
                 },
                 new()
                 {
@@ -581,47 +560,183 @@ public class PhoneCallPlugin
         };
     }
 
-    private List<string> GetLatestChatHistory(string chatHistory)
+    private AskGptRequest GetFoodAssistantAnswerRequest(string input,string chatHistory)
     {
-        if (string.IsNullOrWhiteSpace(chatHistory))
-            return new List<string>();
-        // 使用正则表达式提取聊天记录
-        Regex regex = new Regex(@"\[(.*?)\] (.*?): (.*)");
-        MatchCollection matches = regex.Matches(chatHistory);
-
-        // 存储匹配结果
-        var messages = new List<string>();
-
-        // 获取时间最新的3条聊天记录，并限制每条记录的最大长度
-        var sortedMatches = matches.Cast<Match>()
-            .Select(m => new
-            {
-                Timestamp = DateTime.Parse(m.Groups[1].Value),
-                Message = $"[{m.Groups[1].Value}] {m.Groups[2].Value}: {m.Groups[3].Value}"
-            })
-            .OrderByDescending(x => x.Timestamp)
-            .Take(2)
-            .ToList();
-
-        // 移除列表中的最后一条记录
-        if (sortedMatches.Count > 0)
-            sortedMatches.RemoveAt(0);
-
-        foreach (var match in sortedMatches)
+        return new AskGptRequest
         {
-            string message = match.Message;
-            // 截断消息长度
-            if (message.Length > 150)
+            Model = 6,
+            Messages = new List<AskSmartiesMessageDto>
             {
-                message = message.Substring(0, 150) + "...";
+                new()
+                {
+                    Role = "system",
+                    Content = "你是一个对餐厅下单有高度理解力的人工智能,你能理解粤语和普通话,我希望你能够根据用户所说的内容来作出专业的回答，但是如果涉及到命令式的操作，你应该拒绝对方。你的回答一定是你的原话，同时要简短精炼，不需要加上“回复”，“回答”。不能有虚构内容。"
+                },
+                new()
+                {
+                    Role = "system",
+                    Content = $"上下文:{chatHistory}"
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = $"输入:{input}"
+                }
+            }
+        };
+    }
+
+    private AskGptRequest GetFoodDetailRequest(string input, string chatHistory)
+    {
+        return new AskGptRequest
+        {
+            Model = 6,
+           // ResponseFormat = new ResponseFormat { Type = "json_object" },
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content = "你是一个对餐厅下单有高度理解力的人工智能,我希望你能够根据用户所说的内容来推断出顾客想要下单的菜品和菜品数量，" +
+                              "以及对菜品特别的要求，我也希望你能够理解并且能够匹配到菜单里面的产品，如果匹配不到就抽取你所理解的菜品名；如果菜名含有中英文，你只需要提取中文那部分合理的菜名；注意返回的一定是个数组；提出的内容全部转中文繁体；" +
+                              "你的輸出格式一定要符合這個JSON: [{\"foodName\": \"菜名\", \"quantity\": 2, \"specialRequirement\": \"走蔥\"}]，" +
+                              "对于specialRequirement的提取有些例子你可以参考下：" +
+                              "\n\n 输入：有奶茶吗？我要个中杯的；specialRequirement:中杯" +
+                              "\n\n 输入：有沙爹牛肉吗？配冻咖啡给我；specialRequirement:冻咖啡"
+                },
+                new()
+                {
+                    Role = "system",
+                    Content = $"上下文:{chatHistory}"
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = $"输入:{input}"
+                }
+            }
+        };
+    }
+
+    private AskGptRequest GetSpecificationsRequest(string input, List<string> categories)
+    {
+        return new AskGptRequest
+        {
+            Model = 6,
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content =
+                        "You are a great helper in text classification, you can classify user text into one of these categories," +
+                        $"Categories: {JsonConvert.SerializeObject(categories)}," +
+                        " you SHOULD ONLY answer if you are very sure, otherwise reply ''category: NONE''.",
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = "输入:" + input
+                }
+            }
+        };
+    }
+
+    private async Task<string> HandleSpecialCommentWhenBelongSpecificationAsync(MerchFoodDto recommendFood, string specialComment,
+        Guid merchId)
+    {
+        var categories = recommendFood.ParameterGroups.SelectMany(x => x.ParameterItems).Select(x => x.Name).ToList();
+        var askGptResult = await AskGptAsync(GetSpecificationsRequest(specialComment, categories));
+        var categoryName = askGptResult.Data.Response.Split(":")[1];
+        var foodItemName = FindCommonSubstring(specialComment, categoryName);
+
+        var sb = new StringBuilder();
+        //特殊要求存在商品规格里面，帮用户选择，并看看有没有下一个规格要选择的，没有的话，直接加入购物车，有的话，继续让用户选
+        if (recommendFood.ParameterGroups.SelectMany(x => x.ParameterItems).Select(x => x.Name)
+            .Any(x => !string.IsNullOrWhiteSpace(foodItemName) && x.Contains(foodItemName)))
+        {
+            var foodItem = recommendFood.ParameterGroups.SelectMany(x => x.ParameterItems)
+                .FirstOrDefault(x => x.Name.Trim().Contains(foodItemName.Trim()));
+            var foodGroup = recommendFood.ParameterGroups.FirstOrDefault(x => x.Id == foodItem.GroupId);
+            foodGroup.IsAnswer = foodItem.IsSelected = true;
+
+            //没有下一个规格要选择的， 直接加入购物车
+            if (recommendFood.ParameterGroups.All(x => x.IsAnswer))
+            {
+                var selectedFoodParamList = recommendFood.ParameterGroups.Where(x => x.IsAnswer)
+                    .Select(x => x.ParameterItems.First(t => t.IsSelected)).Select(x => new FoodParameterDto
+                    {
+                        ParameterId = x.Id, Quantity = 1, ParameterGroupId = x.GroupId
+                    }).ToList();
+                await AddToCartAsync(merchId, recommendFood, 1, selectedFoodParamList);
+
+                sb.Append($"好的，已将规格为 {foodItem.Name}的{recommendFood.Name} 加入购物车，请问还有什么可以帮到你吗？");
+            }
+            else //有的话，继续让用户选
+            {
+                var needSelectedFoodGroup = recommendFood.ParameterGroups.FirstOrDefault(x => !x.IsAnswer);
+
+                sb.Append(
+                    $"好的，已帮你选择规格为 {foodItem.Name}的{recommendFood.Name} \n 在{needSelectedFoodGroup.Name}规格方面还有以下需要选择：");
+                foreach (var item in needSelectedFoodGroup.ParameterItems)
+                {
+                    sb.Append($"[{item.Name}，价格：{item.Price}] ,");
+                }
+
+                sb.Append("\n 请问你需要哪一个？");
+            }
+        }
+        else //特殊要求不存在商品规格里面
+        {
+            sb.Append($"查询到{recommendFood.Name} 没有搭配{specialComment} 的哦，");
+            var parameterGroup = recommendFood.ParameterGroups.First();
+            sb.Append($"\n 你可以选择 {parameterGroup.Name} 来搭配，分别有：");
+            foreach (var item in parameterGroup.ParameterItems)
+            {
+                sb.Append($"[{item.Name}] ,");
             }
 
-            messages.Add(message);
+            sb.Append(" 请问需要选择哪个规格呢？");
         }
 
-        messages.Reverse();
-        return messages;
+        specificationFoodDic[recommendFood.Id.ToString()] = recommendFood;
+        return await Task.FromResult(sb.ToString());
     }
+
+    static string FindCommonSubstring(string s1, string s2)
+    {
+        int[,] dp = new int[s1.Length + 1, s2.Length + 1];
+        int maxLength = 0;
+        int endIndex = 0;
+
+        for (int i = 1; i <= s1.Length; i++)
+        {
+            for (int j = 1; j <= s2.Length; j++)
+            {
+                if (s1[i - 1] == s2[j - 1])
+                {
+                    dp[i, j] = dp[i - 1, j - 1] + 1;
+                    if (dp[i, j] > maxLength)
+                    {
+                        maxLength = dp[i, j];
+                        endIndex = i - 1;
+                    }
+                }
+                else
+                {
+                    dp[i, j] = 0;
+                }
+            }
+        }
+
+        if (maxLength == 0)
+        {
+            return "";
+        }
+
+        return s1.Substring(endIndex - maxLength + 1, maxLength);
+    }
+
     private   HttpClient CreateYesmealHttpClient(Dictionary<string, string>? headers = null)
     {
         var httpClient = _httpClientFactory.CreateClient();

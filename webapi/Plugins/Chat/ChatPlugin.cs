@@ -637,12 +637,14 @@ public class ChatPlugin
         CancellationToken cancellationToken,
         IEnumerable<CitationSource>? citations = null, string userAsking = null)
     {
-        // Create the stream
-        var chatCompletion = this._kernel.GetRequiredService<IChatCompletionService>();
+        var messages = await this._chatMessageRepository.FindByChatIdAsync(chatId);
+        var sortedMessages = messages.Where(x => x.UserId == "Bot").OrderByDescending(m => m.Timestamp);
+        var chatHistory = sortedMessages.Select(x => x.ToFormattedString()).ToList();
+
         var intentResult = await _kernel.InvokeAsync(nameof(PhoneCallPlugin), "IntentSpot", new()
         {
             { "question", userAsking },
-            { "ChatHistory", prompt.ChatHistory }
+            { "ChatHistory", chatHistory.FirstOrDefault() }
         },cancellationToken);
 
         // var stream =
