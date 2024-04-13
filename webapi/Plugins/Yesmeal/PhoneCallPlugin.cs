@@ -108,6 +108,10 @@ public class PhoneCallPlugin
             case "OrderDetail":
                 resultTmp = await GetMerchantOrderDetailAsync();
                 break;
+            case "EmptyCart":
+                 await this.EmptyCartAsync();
+                 resultTmp = "你好，已帮你清空购物车";
+                break;
         }
 
         return resultTmp;
@@ -471,7 +475,7 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("empty/clear/remove the shoppingcart")]
-    public   async Task EmptyCartAsync()
+    public  async Task EmptyCartAsync()
     {
         using var  httpClient = CreateYesmealHttpClient();
 
@@ -500,7 +504,7 @@ public class PhoneCallPlugin
                 {
                     Role = "system",
                     Content = "You are a helpful assistant for intent classification,you can understand cantonese and mandarin, you can classify the user Text into one of these intents, " +
-                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\"],  " +
+                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\",\"EmptyCart\"],  " +
                               "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
                               "These are the positive examples: Samples:[\"你好\",\"中国有哪些特色美食\",\"如何学习编程\",\"谈谈你对中美关系的理解\"] Intent: NONE " +
                               "\n\n Samples:[\"餐厅地址在哪里\",\"请问\\\"店铺\\\"在哪里\"] Intent: AskForAddress " +
@@ -508,9 +512,10 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\"] Intent: CheckParkingLotExists " +
                               "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\"] Intent: IntroducingRecommendedDishes " +
                               "\n\n Samples:[\"下单\",\"埋单\",\"落单\",\"结算\"] Intent: AddOrder " +
-                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"来个牛肉饭\",\"要一份\"] Intent: AddCart " +
+                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"来个牛肉饭\",\"要一份\",\"加入购物车\"] Intent: AddCart " +
                               "\n\n Samples:[\"有无蛋炒饭\",\"三明治多少钱\",\"烧鸭怎么卖\"] Intent: AskFoodDetail " +
                               "\n\n Samples:[\"订单详情\",\"看看我买了什么\"] Intent: OrderDetail " +
+                              "\n\n Samples:[\"清空购物车\"] Intent: EmptyCart " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
                               "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\"] Intent: NONE"
