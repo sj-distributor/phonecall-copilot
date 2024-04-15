@@ -35,21 +35,28 @@ public class PhoneCallPlugin
     [KernelFunction, Description("spot the intent")]
     public async Task<string> IntentSpotAsync(KernelArguments arguments)
     {
-        if (arguments["question"] == null) return "抱歉，系统暂时开了小差，请重新发送消息～";
-        var latestChatHistory = arguments["ChatHistory"].ToString();
-        if (latestChatHistory.Length > 150)
-            latestChatHistory = latestChatHistory.Substring(0, 150) + "...";
-
-        var question = arguments["question"].ToString();
-
-        if (specificationFoodDic.Values.Any(x => x.ParameterGroups.Exists(t => !t.IsAnswer)))
+        try
         {
-            Console.WriteLine("has SpecificationsFoods need to select");
-            return await AddSpecificationsFoodsync(question, latestChatHistory);
-        }
+            if (arguments["question"] == null) return "抱歉，系统暂时开了小差，请重新发送消息～";
+            var latestChatHistory = arguments["ChatHistory"].ToString();
+            if (latestChatHistory.Length > 150)
+                latestChatHistory = latestChatHistory.Substring(0, 150) + "...";
 
-        var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(question, latestChatHistory));
-        return await PolishQuestionIntentAsync(question, questionIntentResponse.Data.Response, latestChatHistory);
+            var question = arguments["question"].ToString();
+
+            if (specificationFoodDic.Values.Any(x => x.ParameterGroups.Exists(t => !t.IsAnswer)))
+            {
+                Console.WriteLine("has SpecificationsFoods need to select");
+                return await AddSpecificationsFoodsync(question, latestChatHistory);
+            }
+
+            var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(question, latestChatHistory));
+            return await PolishQuestionIntentAsync(question, questionIntentResponse.Data.Response, latestChatHistory);
+        }
+        catch (Exception e)
+        {
+            return "我不是很明白你的意思，可以再说一次吗？";
+        }
     }
 
     private async Task<string> PolishQuestionIntentAsync(string question, string questionIntent, string chatHistory,
@@ -247,7 +254,7 @@ public class PhoneCallPlugin
                 var askFoodIntent = await AskGptAsync(this.GetFoodSpecificationOrSpecialCommentRequest(specialComment, chatHistory));
                 var intentValue = askFoodIntent.Data.Response.Split(':')[1].Trim();
                 if (intentValue == "Specification" && recommendFood.ParameterGroups.Count == 0)
-                    return await Task.FromResult($"查询到{recommendFood.Name} 不是多规格商品,需要正常帮你加入购物车吗？");
+                    return await Task.FromResult($"你好！我们这里的{recommendFood.Name} 目前只提供单一规格，没有{specialComment}选项,我可以为你将它加入购物车吗？");
 
                 if (intentValue == "Specification" && recommendFood.ParameterGroups.Count > 0)
                 {
@@ -506,7 +513,7 @@ public class PhoneCallPlugin
                     Content = "You are a helpful assistant for intent classification,you can understand cantonese and mandarin, you can classify the user Text into one of these intents, " +
                               "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\",\"EmptyCart\"],  " +
                               "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
-                              "These are the positive examples: Samples:[\"你好\",\"中国有哪些特色美食\",\"如何学习编程\",\"谈谈你对中美关系的理解\"] Intent: NONE " +
+                              "These are the positive examples:" +
                               "\n\n Samples:[\"餐厅地址在哪里\",\"请问\\\"店铺\\\"在哪里\"] Intent: AskForAddress " +
                               "\n\n Samples:[\"获取活动\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
                               "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\"] Intent: CheckParkingLotExists " +
@@ -518,7 +525,7 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"清空购物车\"] Intent: EmptyCart " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
-                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\"] Intent: NONE"
+                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\",\"我想落张电话单\",\"不要了\",\"点菜.\"] Intent: NONE"
                 },
                 new()
                 {
@@ -575,7 +582,7 @@ public class PhoneCallPlugin
                 new()
                 {
                     Role = "system",
-                    Content = "你是一个对餐厅下单有高度理解力的人工智能,你能理解粤语和普通话,我希望你能够根据用户所说的内容来作出专业的回答，但是如果涉及到命令式的操作，你应该拒绝对方。你的回答一定是你的原话，同时要简短精炼，不需要加上“回复”，“回答”。不能有虚构内容。"
+                    Content = "你是一个对餐厅下单有高度理解力的人工智能,你能理解粤语和普通话,我希望你能够根据用户所说的内容来作出专业的回答，但是如果涉及到命令式的操作，你应该拒绝对方，同时要简短精炼，不需要加上“回复”，“回答”，“输出”。不能有虚构内容。你应该只给建议，而不是执行操作。"
                 },
                 new()
                 {
@@ -681,8 +688,7 @@ public class PhoneCallPlugin
             {
                 var needSelectedFoodGroup = recommendFood.ParameterGroups.FirstOrDefault(x => !x.IsAnswer);
 
-                sb.Append(
-                    $"好的，已帮你选择规格为 {foodItem.Name}的{recommendFood.Name} \n 在{needSelectedFoodGroup.Name}规格方面还有以下需要选择：");
+                sb.Append($"好的，已帮你选择规格为 {foodItem.Name}的{recommendFood.Name} \n 在{needSelectedFoodGroup.Name}规格方面还有以下需要选择：");
                 foreach (var item in needSelectedFoodGroup.ParameterItems)
                 {
                     sb.Append($"[{item.Name}，价格：{item.Price}] ,");
