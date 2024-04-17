@@ -359,6 +359,7 @@ public class PhoneCallPlugin
 
         if (string.IsNullOrWhiteSpace(askGptResult.Data.Response) || askGptResult.Data.Response.Contains("NONE"))
         {
+            specificationFoodDic.Clear();
             var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(specificationsName, latestChatHistory));
             return await PolishQuestionIntentAsync(specificationsName, questionIntentResponse.Data.Response, latestChatHistory, IntentScenes.Specification);
         }
@@ -532,15 +533,16 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"餐厅地址在哪里\",\"请问\\\"店铺\\\"在哪里\"] Intent: AskForAddress " +
                               "\n\n Samples:[\"获取活动\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
                               "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\"] Intent: CheckParkingLotExists " +
-                              "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\"] Intent: IntroducingRecommendedDishes " +
-                              "\n\n Samples:[\"下单\",\"埋单\",\"落单\",\"结算\"] Intent: AddOrder " +
-                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"来个牛肉饭\",\"要一份\",\"加入购物车\"] Intent: AddCart " +
-                              "\n\n Samples:[\"有无蛋炒饭\",\"三明治多少钱\",\"烧鸭怎么卖\"] Intent: AskFoodDetail " +
+                              "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\"] Intent: IntroducingRecommendedDishes " +
+                              "\n\n Samples:[\"下单\",\"需要埋单吗, 好，ok\",\"落单\",\"结算\"] Intent: AddOrder " +
+                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
+                              "\n\n Samples:[\"有无蛋炒饭\",\"三明治多少钱\",\"烧鸭怎么卖\",\"有中杯的奶茶吗\",\"有皮蛋瘦肉粥吗\"] Intent: AskFoodDetail " +
                               "\n\n Samples:[\"订单详情\",\"看看我买了什么\"] Intent: OrderDetail " +
                               "\n\n Samples:[\"清空购物车\"] Intent: EmptyCart " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
-                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\",\"我想落张电话单\",\"不要了\",\"点菜.\"] Intent: NONE"
+                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\"," +
+                              "\"我想落张电话单\",\"不要了\",\"点菜\"] Intent: NONE"
                 },
                 new()
                 {
@@ -627,7 +629,10 @@ public class PhoneCallPlugin
                     Content = "你是一个对餐厅下单有高度理解力的人工智能,我希望你能够根据用户所说的内容来推断出顾客想要下单的菜品和菜品数量，" +
                               "以及对菜品特别的要求，我也希望你能够理解并且能够匹配到菜单里面的产品，如果匹配不到就抽取你所理解的菜品名；如果菜名含有中英文，你只需要提取中文那部分合理的菜名；注意返回的一定是个数组；提出的内容全部转中文繁体；" +
                               "你的輸出格式一定要符合這個JSON: [{\"foodName\": \"菜名\", \"quantity\": 2, \"specialRequirement\": \"走蔥\"}]，" +
-                              "对于specialRequirement的提取有些例子你可以参考下：" +
+                              "以下是一些例子 " +
+                              "\n\n 上下文:查询到蛋炒饭 价格10元，需要帮你加入购物车吗 \n\n 输入:ok \n\n 返回JSON [{\"foodName\": \"蛋炒饭\", \"quantity\": 1, \"specialRequirement\": \"\"}] "+
+                              "\n\n 上下文: \n\n 输入:我要个干炒牛河,加辣 \n\n 返回JSON [{\"foodName\": \"干炒牛河\", \"quantity\": 1, \"specialRequirement\": \"加辣\"}] "+
+                              "\n\n 对于specialRequirement的提取有些例子你可以参考下：" +
                               "\n\n 输入：有奶茶吗？我要个中杯的；specialRequirement:中杯" +
                               "\n\n 输入：有沙爹牛肉吗？配冻咖啡给我；specialRequirement:冻咖啡"
                 },
