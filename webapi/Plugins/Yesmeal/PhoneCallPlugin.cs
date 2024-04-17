@@ -37,26 +37,33 @@ public class PhoneCallPlugin
     {
         try
         {
-            if (arguments["question"] == null) return "抱歉，系统暂时开了小差，请重新发送消息～";
-            var latestChatHistory = arguments["ChatHistory"].ToString();
-            if (latestChatHistory.Length > 150)
-                latestChatHistory = latestChatHistory.Substring(0, 150) + "...";
-
-            var question = arguments["question"].ToString();
+            var askContent = GetAskContent(arguments);
 
             if (specificationFoodDic.Values.Any(x => x.ParameterGroups.Exists(t => !t.IsAnswer)))
             {
                 Console.WriteLine("has SpecificationsFoods need to select");
-                return await AddSpecificationsFoodsync(question, latestChatHistory);
+                return await AddSpecificationsFoodsync(askContent.Question, askContent.LatestChatHistory);
             }
 
-            var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(question, latestChatHistory));
-            return await PolishQuestionIntentAsync(question, questionIntentResponse.Data.Response, latestChatHistory);
+            var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(askContent.Question, askContent.LatestChatHistory));
+            return await PolishQuestionIntentAsync(askContent.Question, questionIntentResponse.Data.Response, askContent.LatestChatHistory);
         }
         catch (Exception e)
         {
             return "我不是很明白你的意思，可以再说一次吗？";
         }
+    }
+
+    private (string Question, string LatestChatHistory) GetAskContent(KernelArguments arguments)
+    {
+        if (arguments["question"] == null) throw new Exception("抱歉，系统暂时开了小差，请重新发送消息～");
+        var latestChatHistory = arguments["ChatHistory"].ToString();
+        if (latestChatHistory.Length > 150)
+            latestChatHistory = latestChatHistory.Substring(0, 150) + "...";
+
+        var question = arguments["question"].ToString();
+
+        return (question, latestChatHistory);
     }
 
     private async Task<string> PolishQuestionIntentAsync(string question, string questionIntent, string chatHistory,
@@ -76,10 +83,10 @@ public class PhoneCallPlugin
                 resultTmp = $"你好，地址是：{await GetMerchantAddress(false)}";
                 break;
             case "GetActivity":
-                resultTmp = $"活动内容如下：\n {await GetMerchantCampaign(false)} \n 请问还有什么可以帮到你吗？";
+                resultTmp = $"{await GetMerchantCampaign(false)}, 请问需要下单吗";
                 break;
             case "CheckParkingLotExists":
-                resultTmp = $"你好：\n {await GetMerchantParkingInfo(false)} \n 请问还有什么可以帮到你吗？";
+                resultTmp = $"你好, {await GetMerchantParkingInfo(false)}, 请问还有什么可以帮到你吗";
                 break;
             case "IntroducingRecommendedDishes":
                 resultTmp = await GetRecommendDishWithoutSpecificCategoryName(false);
@@ -138,15 +145,23 @@ public class PhoneCallPlugin
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadFromJsonAsync<GetMerchCouponDistributionCampaignsByQueryResponse>();
-            var originalAnswer = result?.Campaigns.FirstOrDefault()?.MerchCouponPromotions.FirstOrDefault()?.Description;
-            Console.WriteLine(originalAnswer);
-            if (!string.IsNullOrWhiteSpace(originalAnswer))
-                originalAnswer = await Translation(originalAnswer);
+            var promotion = result?.Campaigns.FirstOrDefault()?.MerchCouponPromotions.FirstOrDefault();
 
-            var answer = originalAnswer ??
-                         "感谢您的关注。我们目前正在考虑不同的优惠活动，以回馈我们的顾客。请您持续关注我们的店铺，我们会在未来很快推出一些特别的优惠，让您获得更多的实惠和惊喜！";
+            if (promotion == null)
+                return await Task.FromResult("感谢您的关注。我们目前正在考虑不同的优惠活动，以回馈我们的顾客。请您持续关注我们的店铺，我们会在未来很快推出一些特别的优惠，让您获得更多的实惠和惊喜！");
 
-            return await Task.FromResult(answer);
+            Console.WriteLine(promotion);
+            string promotionAnswer = string.Empty;
+            if (promotion.CouponType == MerchCouponPromotionType.Cash)
+            {
+                promotionAnswer = promotion.MinimumOrderAmountToActivate == 0m
+                    ? $"您好，现在下单就送{promotion.Discount}元无门槛的优惠券哦"
+                    : $"您好，现在下单会送满{promotion.MinimumOrderAmountToActivate}减{promotion.Discount}的优惠券活动";
+            }
+            if (promotion.CouponType == MerchCouponPromotionType.Percentage)
+                promotionAnswer= $"您好，现在下单会送支付满{promotion.MinimumOrderAmountToActivate}有{((100 - promotion.Discount) / 100) * 10}折的优惠券活动";
+
+            return await Task.FromResult(promotionAnswer);
         }, nameof(GetMerchantCampaign));
     }
 
