@@ -354,16 +354,32 @@ public class PhoneCallPlugin
         return $"{orderDetailResult} \n\n 下单成功，你的取餐号为：{result.MealCode}，请在{result.PickupTime}左右到店pick up，多谢。";
     }
 
-    public async Task<string> AddSpecificationsFoodsync(string specificationsName, string latestChatHistory)
+    private async Task<string> AddSpecificationsFoodsync(string specificationsName, string latestChatHistory)
     {
         var categories = specificationFoodDic.Values.SelectMany(x => x.ParameterGroups).SelectMany(x => x.ParameterItems).Select(x => x.Name).ToList();
-        var askGptResult = await AskGptAsync(GetSpecificationsRequest(specificationsName, categories));
+        var askGptResult = await AskGptAsync(GetSpecificationsExtendRequest(specificationsName, categories));
 
         if (string.IsNullOrWhiteSpace(askGptResult.Data.Response) || askGptResult.Data.Response.Contains("NONE"))
         {
             specificationFoodDic.Clear();
             var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(specificationsName, latestChatHistory));
             return await PolishQuestionIntentAsync(specificationsName, questionIntentResponse.Data.Response, latestChatHistory, IntentScenes.Specification);
+        }
+
+        if (askGptResult.Data.Response.Contains("OTHER"))
+        {
+            var specificationFood = specificationFoodDic.First().Value;
+            var sb = new StringBuilder();
+            sb.Append($"{specificationFood.Name} 是没有搭配{specificationsName} 的哦，");
+            var parameterGroup = specificationFood.ParameterGroups.First();
+            sb.Append($"\n 请你继续选择 {parameterGroup.Name} 的规格来搭配，分别有：");
+            foreach (var item in parameterGroup.ParameterItems)
+            {
+                sb.Append($"[{item.Name}] ,");
+            }
+
+            sb.Append(" 请问需要选择哪个规格呢？");
+            return await Task.FromResult(sb.ToString());
         }
 
         var foodItemName = askGptResult.Data.Response.Split(":")[1];
@@ -665,7 +681,7 @@ public class PhoneCallPlugin
                     Content =
                         "You are a great helper in text classification, you can classify user text into one of these categories," +
                         $"Categories: {JsonConvert.SerializeObject(categories)}," +
-                        " you SHOULD ONLY answer if you are very sure, otherwise reply ''category: NONE''.",
+                        " you SHOULD ONLY answer if you are very sure, otherwise reply ''category: NONE''."
                 },
                 new()
                 {
@@ -676,6 +692,47 @@ public class PhoneCallPlugin
         };
     }
 
+    private AskGptRequest GetSpecificationsExtendRequest(string input, List<string> categories)
+    {
+        return new AskGptRequest
+        {
+            Model = 6,
+            Messages = new List<AskSmartiesMessageDto>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content = "你很擅长分类一些规格和类别，你能通过提供的规格和用户的输入进行分析，"+
+                    "用户的输入只有三种可能：第一种：属于提供规格中的一种；第二种：不属于提供规格的任意一种，但也是属于类别的一种；第三种：不属于提供规格的任意一种；"+
+                    "以下是一些例子："+
+                    "提供规格：[\"酱油皇汁\",\"糖醋汁\",\"辣椒水\",\"蒜蓉汁\"] 输入：咸猪手汁 输出：category:OTHER "+
+                    "\n\n"+
+                    "提供规格：[\"海带汤\",\"猪骨汤\",\"玉米汤\",\"薏米汤\"] 输入：有鸡蛋汤搭配吗 输出：category:OTHER"+
+                    "\n\n"+
+                    "提供规格：[\"black 黑色\",\"white 白色\",\"yellow 黄色\"] 输入：通心菜 输出：category:OTHER"+
+                    "\n\n"+
+                    "提供规格：[\"big 大尺寸\",\"middle 中尺寸\",\"small 小尺寸\"] 输入：柠檬茶 输出：category:OTHER"+
+                    "\n\n"+
+                    "提供规格：[\"薏米糖水\",\"红豆沙糖水\",\"绿豆沙糖水\"] 输入：有番薯糖水吗 输出：category:OTHER"+
+                    "\n\n"+
+                    "提供规格：[\"Steam Rice 白飯\",\"Spaghetti 意粉\",\"Spaghetti 米粉\"] 输入：白飯 输出：category:Steam Rice 白飯"+
+                    "\n\n"+
+                    "提供规格：[\"red tea 冰红茶\",\"caffe 咖啡\",\"green bee 绿豆汤\"] 输入：咖啡 输出：category:caffe 咖啡"+
+                    "\n\n"+
+                    "提供规格：[\"B大杯\",\"M中杯\",\"S小杯\"] 输入：来个中杯 输出：category:M中杯"+
+                    "\n\n"+
+                    "提供规格：[\"冻可乐\",\"冻冰水\",\"热茶\"] 输入：有其他推荐吗 输出：category:NONE"+
+                    "\n\n"+
+                    "提供规格：[\"韭菜\",\"大白菜\",\"天麻菜\"] 输入：不要了 输出：category:NONE"
+                },
+                new()
+                {
+                    Role = "user",
+                    Content = $"提供规格：{JsonConvert.SerializeObject(categories)} 輸入：{input}"
+                }
+            }
+        };
+    }
     private async Task<string> HandleSpecialCommentWhenBelongSpecificationAsync(MerchFoodDto recommendFood, string specialComment,
         Guid merchId)
     {
