@@ -196,8 +196,10 @@ public class PhoneCallPlugin
         Console.WriteLine("hit GetRecommendDishWithoutSpecificCategoryName");
         var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
         var FoodCategory = new[] { "牛肉", "豬肉", "雞肉", "麵類", "粥" };
-        var random = new Random();
+        int seed = DateTime.Now.Millisecond;
+        var random = new Random(seed);
         var randomNumber = random.Next(1, 6); // 生成1到5之间的随机数
+
         var recommendFood = await GetRecommendFoodAsync(merchId, foodName: FoodCategory[randomNumber - 1]);
         if (recommendFood == null)
             return await Task.FromResult("今天暂无推荐菜哦。请问还有什么可以帮到你？");
