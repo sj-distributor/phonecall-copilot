@@ -125,6 +125,9 @@ public class PhoneCallPlugin
             case "EmptyCart":
                  await this.EmptyCartAsync();
                  resultTmp = "你好，已帮你清空购物车";
+                 break;
+            case "DrinkDetail":
+                resultTmp = await this.GetRecommendDrinksAsync();
                 break;
         }
 
@@ -200,7 +203,7 @@ public class PhoneCallPlugin
         var random = new Random(seed);
         var randomNumber = random.Next(1, 6); // 生成1到5之间的随机数
 
-        var recommendFood = await GetRecommendFoodAsync(merchId, foodName: FoodCategory[randomNumber - 1]);
+        var recommendFood = (await GetRecommendFoodAsync(merchId, foodName: FoodCategory[randomNumber - 1])).FirstOrDefault();
         if (recommendFood == null)
             return await Task.FromResult("今天暂无推荐菜哦。请问还有什么可以帮到你？");
 
@@ -214,7 +217,7 @@ public class PhoneCallPlugin
     {
         Console.WriteLine("hit GetRecommendDishWithSpecificCategoryName");
         var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-        var recommendFood = await GetRecommendFoodAsync(merchId, foodName: categoryName);
+        var recommendFood = (await GetRecommendFoodAsync(merchId, foodName: categoryName)).FirstOrDefault();
         if (recommendFood == null)
             return await Task.FromResult($"今天暂无{categoryName}的推荐菜哦。请问还有什么可以帮到你？");
 
@@ -261,7 +264,7 @@ public class PhoneCallPlugin
                 }
             }
 
-            var recommendFood = await GetRecommendFoodAsync(merchId, foodName);
+            var recommendFood = (await GetRecommendFoodAsync(merchId, foodName)).FirstOrDefault();
             if (recommendFood == null) return $"暂无{foodName},请换一个好吗？";
 
             if (!string.IsNullOrWhiteSpace(specialComment))
@@ -370,7 +373,7 @@ public class PhoneCallPlugin
         {
             var specificationFood = specificationFoodDic.First().Value;
             var sb = new StringBuilder();
-            sb.Append($"{specificationFood.Name} 是没有搭配{specificationsName} 的哦，");
+            sb.Append($"{specificationFood.Name} 是没有搭配{RemoveStrings(specificationsName)} 的哦，");
             var parameterGroup = specificationFood.ParameterGroups.First();
             sb.Append($"\n 请你继续选择 {parameterGroup.Name} 的规格来搭配，分别有：");
             foreach (var item in parameterGroup.ParameterItems)
@@ -431,15 +434,25 @@ public class PhoneCallPlugin
         return await Task.FromResult("抱歉，系统开了小差，请再说多一次好吗？");
     }
 
-    private   async Task<MerchFoodDto> GetRecommendFoodAsync(Guid merchId, string foodName = null)
+    static string RemoveStrings(string input )
     {
-        return await AsyncUtils.SafeInvokeAsync<MerchFoodDto>(async () =>
+        string[] stringsToRemove = { "啊", "哎", "呀", "嗯", "哦", "哇", "哈", "唉", "咦", "哼", "呵", "哎呀", "哈喽", "唔", "吗", ".", "。", "，", "," };
+        foreach (var str in stringsToRemove)
+        {
+            input = input.Replace(str, "");
+        }
+        return input;
+    }
+
+    private   async Task<List<MerchFoodDto>> GetRecommendFoodAsync(Guid merchId, string foodName = null, int recommendCount = 2)
+    {
+        return await AsyncUtils.SafeInvokeAsync<List<MerchFoodDto>>(async () =>
         {
             using var  httpClient = CreateYesmealHttpClient(new Dictionary<string, string>{ {"LanguageCode", "zh-TW"}});
             var httpContent = new StringContent(JsonConvert.SerializeObject(new RecommendSimilarFoodsRequest
             {
                 Keyword = foodName, MerchIds = new List<Guid> { merchId },
-                RecommendCount = 2
+                RecommendCount = recommendCount
             }));
             httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
@@ -448,9 +461,8 @@ public class PhoneCallPlugin
             response.EnsureSuccessStatusCode();
             Console.WriteLine(await response.Content.ReadAsStringAsync());
             var recommendSimilarFoods = await response.Content.ReadFromJsonAsync<RecommendSimilarFoodsResponse>();
-            var recommendFood = recommendSimilarFoods?.SimilarFoods.FirstOrDefault();
 
-            return await Task.FromResult(recommendFood);
+            return recommendSimilarFoods?.SimilarFoods;
         }, nameof(GetRecommendFoodAsync));
     }
 
@@ -534,6 +546,19 @@ public class PhoneCallPlugin
         response.EnsureSuccessStatusCode();
     }
 
+    private async Task<string> GetRecommendDrinksAsync()
+    {
+        Console.WriteLine("hit GetRecommendDrinks");
+        var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
+
+        var recommendFoods = await GetRecommendFoodAsync(merchId, foodName: "茶", recommendCount: 5);
+        if (recommendFoods == null || !recommendFoods.Any())
+            return "";
+
+        var resultTemplate = $"餐厅提供一些如{JsonConvert.SerializeObject(recommendFoods.Select(x => x.Name))}等饮品选择, 请问你要饮咩嘢呢？";
+        return await Task.FromResult(resultTemplate);
+    }
+
     private AskGptRequest GetQuestionIntentRequest(string question, string chatHistory)
     {
         return new AskGptRequest
@@ -545,7 +570,7 @@ public class PhoneCallPlugin
                 {
                     Role = "system",
                     Content = "You are a helpful assistant for intent classification,you can understand cantonese and mandarin, you can classify the user Text into one of these intents, " +
-                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\",\"EmptyCart\"],  " +
+                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\",\"EmptyCart\",\"DrinkDetail\"],  " +
                               "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
                               "These are the positive examples:" +
                               "\n\n Samples:[\"餐厅地址在哪里\",\"请问\\\"店铺\\\"在哪里\"] Intent: AskForAddress " +
@@ -553,10 +578,11 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\"] Intent: CheckParkingLotExists " +
                               "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\"] Intent: IntroducingRecommendedDishes " +
                               "\n\n Samples:[\"下单\",\"需要埋单吗, 好，ok\",\"落单\",\"结算\"] Intent: AddOrder " +
-                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
+                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"请问你要饮咩嘢呢；我要冰红茶\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
                               "\n\n Samples:[\"有无蛋炒饭\",\"三明治多少钱\",\"烧鸭怎么卖\",\"有中杯的奶茶吗\",\"有皮蛋瘦肉粥吗\",\"有点贵，不要了，咁有干炒牛河吗？\"] Intent: AskFoodDetail " +
                               "\n\n Samples:[\"订单详情\",\"看看我买了什么\"] Intent: OrderDetail " +
                               "\n\n Samples:[\"清空购物车\"] Intent: EmptyCart " +
+                              "\n\n Samples:[\"有什么饮品介绍下吗\",\"有咩嘢饮啊\",\"有咩饮料吗\",\"有什么饮料吗\",\"提供哪些饮料选择\"] Intent: DrinkDetail " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
                               "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\"," +
@@ -708,6 +734,8 @@ public class PhoneCallPlugin
                     "提供规格：[\"酱油皇汁\",\"糖醋汁\",\"辣椒水\",\"蒜蓉汁\"] 输入：咸猪手汁 输出：category:OTHER "+
                     "\n\n"+
                     "提供规格：[\"海带汤\",\"猪骨汤\",\"玉米汤\",\"薏米汤\"] 输入：有鸡蛋汤搭配吗 输出：category:OTHER"+
+                    "\n\n"+
+                    "提供规格：[\"出前一丁面\",\"通心粉\",\"鸡蛋面\",\"斋粉\"] 输入：没米饭吗 输出：category:OTHER"+
                     "\n\n"+
                     "提供规格：[\"black 黑色\",\"white 白色\",\"yellow 黄色\"] 输入：通心菜 输出：category:OTHER"+
                     "\n\n"+
