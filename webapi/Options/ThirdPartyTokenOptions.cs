@@ -21,5 +21,5 @@ public class ThirdPartyTokenOptions
     /// <summary>
     /// Local directory from which to load native plugins.
     /// </summary>
-    public IEnumerable<string> YesmealTokensForClient { get; set; }
+    public string YesmealTokensForClient { get; set; }
 }

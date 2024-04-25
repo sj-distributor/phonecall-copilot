@@ -28,7 +28,7 @@ public class TokenManager : ITokenManager
     public TokenManager(IServiceProvider sp)
     {
         var thirdPartyTokens = sp.GetRequiredService<IOptions<ThirdPartyTokenOptions>>();
-        availableTokens = new ConcurrentQueue<string>(thirdPartyTokens.Value.YesmealTokensForClient);
+        availableTokens = new ConcurrentQueue<string>(thirdPartyTokens.Value.YesmealTokensForClient.Split(","));
     }
 
     public string GetToken(string chatId)
