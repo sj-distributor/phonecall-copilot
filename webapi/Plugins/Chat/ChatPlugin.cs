@@ -643,6 +643,7 @@ public class ChatPlugin
 
         var intentResult = await _kernel.InvokeAsync(nameof(PhoneCallPlugin), "IntentSpot", new()
         {
+            { "ChatId", chatId },
             { "question", userAsking },
             { "ChatHistory", chatHistory.FirstOrDefault() }
         },cancellationToken);

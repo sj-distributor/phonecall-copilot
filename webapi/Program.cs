@@ -47,6 +47,9 @@ public sealed class Program
             .AddChatCopilotAuthentication(builder.Configuration)
             .AddChatCopilotAuthorization();
 
+        // Configure and add yesmeal token services
+        builder.Services.AddYesmealTokenService();
+
         // Configure and add semantic services
         builder
             .AddBotConfig()

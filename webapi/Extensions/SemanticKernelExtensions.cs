@@ -13,6 +13,7 @@ using CopilotChat.WebApi.Plugins.Chat;
 using CopilotChat.WebApi.Plugins.Yesmeal;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
+using CopilotChat.WebApi.Utilities;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
@@ -136,7 +137,8 @@ internal static class SemanticKernelExtensions
 
         // Yesmeal plugin
         kernel.ImportPluginFromObject(new PhoneCallPlugin(sp.GetRequiredService<IHttpClientFactory>(),
-            sp.GetRequiredService<IOptions<ThirdPartyTokenOptions>>()), nameof(PhoneCallPlugin));
+                sp.GetRequiredService<IOptions<ThirdPartyTokenOptions>>(), sp.GetRequiredService<ITokenManager>()),
+            nameof(PhoneCallPlugin));
 
         return Task.CompletedTask;
     }

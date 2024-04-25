@@ -1,5 +1,7 @@
 // Copyright (c) Microsoft. All rights reserved.
 
+using System.Collections.Generic;
+
 namespace CopilotChat.WebApi.Options;
 
 public class ThirdPartyTokenOptions
@@ -15,4 +17,9 @@ public class ThirdPartyTokenOptions
     /// Setting indicating if the site is undergoing maintenance.
     /// </summary>
     public string Smarties { get; set; }
+
+    /// <summary>
+    /// Local directory from which to load native plugins.
+    /// </summary>
+    public IEnumerable<string> YesmealTokensForClient { get; set; }
 }

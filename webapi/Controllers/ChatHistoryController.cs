@@ -14,6 +14,7 @@ using CopilotChat.WebApi.Models.Storage;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Plugins.Utils;
 using CopilotChat.WebApi.Storage;
+using CopilotChat.WebApi.Utilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -44,6 +45,7 @@ public class ChatHistoryController : ControllerBase
     private readonly ChatMemorySourceRepository _sourceRepository;
     private readonly PromptsOptions _promptOptions;
     private readonly IAuthInfo _authInfo;
+    private readonly ITokenManager _tokenManager;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatHistoryController"/> class.
@@ -64,7 +66,8 @@ public class ChatHistoryController : ControllerBase
         ChatParticipantRepository participantRepository,
         ChatMemorySourceRepository sourceRepository,
         IOptions<PromptsOptions> promptsOptions,
-        IAuthInfo authInfo)
+        IAuthInfo authInfo,
+        ITokenManager tokenManager)
     {
         this._logger = logger;
         this._memoryClient = memoryClient;
@@ -74,6 +77,7 @@ public class ChatHistoryController : ControllerBase
         this._sourceRepository = sourceRepository;
         this._promptOptions = promptsOptions.Value;
         this._authInfo = authInfo;
+        this._tokenManager = tokenManager;
     }
 
     /// <summary>
@@ -110,6 +114,13 @@ public class ChatHistoryController : ControllerBase
         await this._participantRepository.CreateAsync(new ChatParticipant(this._authInfo.UserId, newChat.Id));
 
         this._logger.LogDebug("Created chat session with id {0}.", newChat.Id);
+
+        var token = _tokenManager.SetToken( newChat.Id);
+
+        if (string.IsNullOrWhiteSpace(token))
+            return this.NotFound(" token had exhausted");
+
+        this._logger.LogDebug("Created chat session with token {0}.", token);
 
         return this.CreatedAtRoute(GetChatRoute, new { chatId = newChat.Id }, new CreateChatResponse(newChat, chatMessage));
     }
@@ -273,6 +284,7 @@ public class ChatHistoryController : ControllerBase
         ChatSession? chatToDelete = null;
         try
         {
+            _tokenManager.ReleaseToken(chatIdString);
             // Make sure the chat session exists
             chatToDelete = await this._sessionRepository.FindByIdAsync(chatIdString);
         }
@@ -293,6 +305,7 @@ public class ChatHistoryController : ControllerBase
 
         // Delete chat session and broadcast update to all participants.
         await this._sessionRepository.DeleteAsync(chatToDelete);
+
         await messageRelayHubContext.Clients.Group(chatIdString).SendAsync(ChatDeletedClientCall, chatIdString, this._authInfo.UserId, cancellationToken: cancellationToken);
 
         return this.NoContent();

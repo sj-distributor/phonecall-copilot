@@ -12,6 +12,7 @@ using CopilotChat.WebApi.Models.Request;
 using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Plugins.Utils;
+using CopilotChat.WebApi.Utilities;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Newtonsoft.Json;
@@ -20,29 +21,37 @@ namespace CopilotChat.WebApi.Plugins.Yesmeal;
 
 public class PhoneCallPlugin
 {
+    private readonly ITokenManager _tokenManager;
     private IHttpClientFactory _httpClientFactory;
     private ThirdPartyTokenOptions _thirdPartyTokenOptions;
-    private static Dictionary<string, MerchFoodDto> specificationFoodDic = new Dictionary<string, MerchFoodDto>();
-    private static Dictionary<string, MerchFoodDto> askFoodHistoryDic = new Dictionary<string, MerchFoodDto>();
-    private static List<string> specialComments = new List<string>();
+    private readonly Guid _merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
+    private string _chatId;
+
+    private static Dictionary<string,  Dictionary<string, MerchFoodDto>> specificationFoodForChatList = new Dictionary<string,  Dictionary<string, MerchFoodDto>>();
+    private static Dictionary<string,  Dictionary<string, MerchFoodDto>> askFoodHistoryForChatList = new Dictionary<string,  Dictionary<string, MerchFoodDto>>();
     public PhoneCallPlugin(IHttpClientFactory httpClientFactory,
-        IOptions<ThirdPartyTokenOptions> thirdPartyTokenOptions)
+        IOptions<ThirdPartyTokenOptions> thirdPartyTokenOptions,
+        ITokenManager tokenManager)
     {
         _httpClientFactory = httpClientFactory;
         _thirdPartyTokenOptions = thirdPartyTokenOptions.Value;
+        _tokenManager = tokenManager;
     }
 
     [KernelFunction, Description("spot the intent")]
     public async Task<string> IntentSpotAsync(KernelArguments arguments)
     {
+        _chatId = arguments["ChatId"].ToString();
+        if (_chatId == null) throw new Exception("chat id is null，please refresh again");
         try
         {
             var askContent = GetAskContent(arguments);
 
-            if (specificationFoodDic.Values.Any(x => x.ParameterGroups.Exists(t => !t.IsAnswer)))
+            if (specificationFoodForChatList.Keys.Any(x => x == this._chatId))
             {
-                Console.WriteLine("has SpecificationsFoods need to select");
-                return await AddSpecificationsFoodsync(askContent.Question, askContent.LatestChatHistory);
+                var specificationFoodDic = specificationFoodForChatList[this._chatId];
+                if (specificationFoodDic.Values.Any(x => x.ParameterGroups.Exists(t => !t.IsAnswer)))
+                    return await AddSpecificationsFoodsync(askContent.Question, askContent.LatestChatHistory);
             }
 
             var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(askContent.Question, askContent.LatestChatHistory));
@@ -75,7 +84,13 @@ public class PhoneCallPlugin
         {
             case "NONE":
                 if (intentScenes == IntentScenes.Specification)
-                    specificationFoodDic.Clear();
+                {
+                    if (specificationFoodForChatList.Keys.Any(x => x == this._chatId))
+                    {
+                        var specificationFoodDic = specificationFoodForChatList[this._chatId];
+                        specificationFoodDic.Clear();
+                    }
+                }
 
                 var questionIntentResponse = await AskGptAsync(GetFoodAssistantAnswerRequest(question, chatHistory));
                 return questionIntentResponse.Data.Response;
@@ -197,13 +212,13 @@ public class PhoneCallPlugin
     public   async Task<string> GetRecommendDishWithoutSpecificCategoryName(bool isAsking)
     {
         Console.WriteLine("hit GetRecommendDishWithoutSpecificCategoryName");
-        var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
+
         var FoodCategory = new[] { "牛肉", "豬肉", "雞肉", "麵類", "粥" };
         int seed = DateTime.Now.Millisecond;
         var random = new Random(seed);
         var randomNumber = random.Next(1, 6); // 生成1到5之间的随机数
 
-        var recommendFood = (await GetRecommendFoodAsync(merchId, foodName: FoodCategory[randomNumber - 1])).FirstOrDefault();
+        var recommendFood = (await GetRecommendFoodAsync(_merchId, foodName: FoodCategory[randomNumber - 1])).FirstOrDefault();
         if (recommendFood == null)
             return await Task.FromResult("今天暂无推荐菜哦。请问还有什么可以帮到你？");
 
@@ -212,12 +227,11 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("Recommend a dish with specific category names，for example : user asked if there were any beef dishes to recommend.")]
-    public   async Task<string> GetRecommendDishWithSpecificCategoryName([Description("specific category name")]string categoryName,
+    public async Task<string> GetRecommendDishWithSpecificCategoryName([Description("specific category name")]string categoryName,
         KernelArguments args)
     {
         Console.WriteLine("hit GetRecommendDishWithSpecificCategoryName");
-        var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-        var recommendFood = (await GetRecommendFoodAsync(merchId, foodName: categoryName)).FirstOrDefault();
+        var recommendFood = (await GetRecommendFoodAsync(_merchId, foodName: categoryName)).FirstOrDefault();
         if (recommendFood == null)
             return await Task.FromResult($"今天暂无{categoryName}的推荐菜哦。请问还有什么可以帮到你？");
 
@@ -236,10 +250,9 @@ public class PhoneCallPlugin
 
         return await AsyncUtils.SafeInvokeAsync<string>(async () =>
         {
-            var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-
             if (intentSource == IntentSource.AskAddCart && intentScenes == IntentScenes.Specification)
             {
+                var askFoodHistoryDic = askFoodHistoryForChatList[this._chatId];
                 var food = askFoodHistoryDic.Values.FirstOrDefault(x => x.Name.Contains(foodName));
 
                 if (food?.ParameterGroups != null && food.ParameterGroups.Any())
@@ -259,12 +272,12 @@ public class PhoneCallPlugin
                 {
                     var resultTemplate = $"好的，{food.Name}已帮你加入购物车。请问还需要其他帮助吗？";
 
-                    await AddToCartAsync(merchId, food, 1);
+                    await AddToCartAsync(_merchId, food, 1);
                     return await Task.FromResult(resultTemplate);
                 }
             }
 
-            var recommendFood = (await GetRecommendFoodAsync(merchId, foodName)).FirstOrDefault();
+            var recommendFood = (await GetRecommendFoodAsync(_merchId, foodName)).FirstOrDefault();
             if (recommendFood == null) return $"暂无{foodName},请换一个好吗？";
 
             if (!string.IsNullOrWhiteSpace(specialComment))
@@ -278,18 +291,19 @@ public class PhoneCallPlugin
 
                 if (intentValue == "Specification" && recommendFood.ParameterGroups.Count > 0)
                 {
-                    return await HandleSpecialCommentWhenBelongSpecificationAsync(recommendFood, specialComment, merchId);
+                    return await HandleSpecialCommentWhenBelongSpecificationAsync(recommendFood, specialComment, _merchId);
                 }
             }
 
-            askFoodHistoryDic[recommendFood.Id.ToString()] = recommendFood;
+            askFoodHistoryForChatList[this._chatId] = new Dictionary<string, MerchFoodDto>();
+            askFoodHistoryForChatList[this._chatId][recommendFood.Id.ToString()] = recommendFood;
             if (recommendFood.ParameterGroups.Count == 0)
             {
                 if (isAsking)
                     return await Task.FromResult($"查询到{recommendFood.Name},价钱：{recommendFood.Price}, 需要帮你加入购物车吗？");
                 var resultTemplate = $"你好，{recommendFood.Name}已帮你加入购物车。需要埋单吗？";
 
-                await AddToCartAsync(merchId, recommendFood, 1);
+                await AddToCartAsync(_merchId, recommendFood, 1);
                 return await Task.FromResult(resultTemplate);
             }
             else
@@ -302,7 +316,8 @@ public class PhoneCallPlugin
                     stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
                 }
 
-                specificationFoodDic[recommendFood.Id.ToString()] = recommendFood;
+                specificationFoodForChatList[this._chatId] = new Dictionary<string, MerchFoodDto>();
+                specificationFoodForChatList[this._chatId][recommendFood.Id.ToString()] = recommendFood;
                 stringBuilder.Append("\n 请问你需要哪一个？");
                 return await Task.FromResult(stringBuilder.ToString());
             }
@@ -312,10 +327,9 @@ public class PhoneCallPlugin
     [KernelFunction, Description("customer want to check order detail")]
     public  async Task<string> GetMerchantOrderDetailAsync()
     {
-        var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-        using var  httpClient = CreateYesmealHttpClient();
+        using var httpClient = CreateYesmealHttpClient(isFromClient: true);
 
-        var response = await httpClient.GetAsync($"https://testapi.yesmeal.com/api/shoppingcart/bymerch?merchid={merchId}")
+        var response = await httpClient.GetAsync($"https://testapi.yesmeal.com/api/shoppingcart/bymerch?merchid={_merchId}")
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
@@ -338,13 +352,12 @@ public class PhoneCallPlugin
     [KernelFunction, Description("customer want to place an order")]
     public  async Task<string> AddOrderByMerchIdAsync(bool isAsking)
     {
-        var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
-        using var  httpClient = CreateYesmealHttpClient();
+        using var httpClient = CreateYesmealHttpClient(isFromClient: true);
 
         var httpContent = new StringContent(JsonConvert.SerializeObject(new
             AddOrderByMerchIdRequest
             {
-                MerchId = merchId
+                MerchId = _merchId
             }));
         httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         var orderDetailResult = await GetMerchantOrderDetailAsync();
@@ -359,6 +372,8 @@ public class PhoneCallPlugin
 
     private async Task<string> AddSpecificationsFoodsync(string specificationsName, string latestChatHistory)
     {
+        Console.WriteLine("hit specification");
+        var specificationFoodDic = specificationFoodForChatList[this._chatId];
         var categories = specificationFoodDic.Values.SelectMany(x => x.ParameterGroups).SelectMany(x => x.ParameterItems).Select(x => x.Name).ToList();
         var askGptResult = await AskGptAsync(GetSpecificationsExtendRequest(specificationsName, categories));
 
@@ -403,21 +418,19 @@ public class PhoneCallPlugin
             foodGroupParameter.IsAnswer = foodItemParameter.IsSelected = true;
             if (foodParameter.ParameterGroups.All(x => x.IsAnswer))
             {
-                var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
                 var selectedFoodParamList = foodParameter.ParameterGroups.Where(x => x.IsAnswer)
                     .Select(x => x.ParameterItems.First(t => t.IsSelected)).Select(x => new FoodParameterDto
                     {
                         ParameterId = x.Id, Quantity = 1, ParameterGroupId = x.GroupId
                     }).ToList();
-                await AddToCartAsync(merchId, foodObj, 1, selectedFoodParamList);
+                await AddToCartAsync(_merchId, foodObj, 1, selectedFoodParamList);
             }
             else
             {
                 var needSelectedFoodGroup = foodParameter.ParameterGroups.FirstOrDefault(x => !x.IsAnswer);
                 var stringBuilder = new StringBuilder();
 
-                stringBuilder.Append(
-                    $"好的，已帮你选择{foodGroupParameter.Name}规格：{foodItemParameter.Name} \n 在{needSelectedFoodGroup.Name}规格方面还有以下需要选择：");
+                stringBuilder.Append($"好的，已帮你选择{foodGroupParameter.Name}规格：{foodItemParameter.Name} \n 在{needSelectedFoodGroup.Name}规格方面还有以下需要选择：");
                 foreach (var item in needSelectedFoodGroup.ParameterItems)
                 {
                     stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
@@ -434,9 +447,9 @@ public class PhoneCallPlugin
         return await Task.FromResult("抱歉，系统开了小差，请再说多一次好吗？");
     }
 
-    static string RemoveStrings(string input )
+    private string RemoveStrings(string input )
     {
-        string[] stringsToRemove = { "啊", "哎", "呀", "嗯", "哦", "哇", "哈", "唉", "咦", "哼", "呵", "哎呀", "哈喽", "唔", "吗", ".", "。", "，", "," };
+        string[] stringsToRemove = {"搭", "无","有","没","啊", "哎", "呀", "嗯", "哦", "哇", "哈", "唉", "咦", "哼", "呵", "哎呀", "哈喽", "唔", "吗", ".", "。", "，", "," };
         foreach (var str in stringsToRemove)
         {
             input = input.Replace(str, "");
@@ -504,7 +517,7 @@ public class PhoneCallPlugin
     private   async Task<string> AddToCartAsync(Guid merchId, MerchFoodDto merchFood,int quantity,
         List<FoodParameterDto>? foodParameters = null)
     {
-        using var httpClient = CreateYesmealHttpClient();
+        using var httpClient = CreateYesmealHttpClient(isFromClient: true);
 
         var httpContent = new StringContent(JsonConvert.SerializeObject(new
             AddOrUpdateItemToCartRequest
@@ -530,12 +543,12 @@ public class PhoneCallPlugin
     [KernelFunction, Description("empty/clear/remove the shoppingcart")]
     public  async Task EmptyCartAsync()
     {
-        using var  httpClient = CreateYesmealHttpClient();
+        using var  httpClient = CreateYesmealHttpClient(isFromClient: true);
 
         var httpContent = new StringContent(JsonConvert.SerializeObject(new
             EmptyShoppingCartRequest
             {
-                MerchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910"),
+                MerchId = _merchId,
                 ShouldThrowGroupifyError = false,
                 ShouldExcludePickupOrFallbackMerchants = false
             }));
@@ -549,9 +562,8 @@ public class PhoneCallPlugin
     private async Task<string> GetRecommendDrinksAsync()
     {
         Console.WriteLine("hit GetRecommendDrinks");
-        var merchId = Guid.Parse("3bd51ea0-9b3e-45f2-92b7-c30fb162f910");
 
-        var recommendFoods = await GetRecommendFoodAsync(merchId, foodName: "茶", recommendCount: 5);
+        var recommendFoods = await GetRecommendFoodAsync(_merchId, foodName: "茶", recommendCount: 5);
         if (recommendFoods == null || !recommendFoods.Any())
             return "";
 
@@ -576,11 +588,11 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"餐厅地址在哪里\",\"请问\\\"店铺\\\"在哪里\"] Intent: AskForAddress " +
                               "\n\n Samples:[\"获取活动\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
                               "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\"] Intent: CheckParkingLotExists " +
-                              "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\"] Intent: IntroducingRecommendedDishes " +
+                              "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\",\"今日推荐干炒牛河；换一个\"] Intent: IntroducingRecommendedDishes " +
                               "\n\n Samples:[\"下单\",\"需要埋单吗, 好，ok\",\"落单\",\"结算\"] Intent: AddOrder " +
                               "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"请问你要饮咩嘢呢；我要冰红茶\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
                               "\n\n Samples:[\"有无蛋炒饭\",\"三明治多少钱\",\"烧鸭怎么卖\",\"有中杯的奶茶吗\",\"有皮蛋瘦肉粥吗\",\"有点贵，不要了，咁有干炒牛河吗？\"] Intent: AskFoodDetail " +
-                              "\n\n Samples:[\"订单详情\",\"看看我买了什么\"] Intent: OrderDetail " +
+                              "\n\n Samples:[\"订单详情\",\"看看我买了什么\",\"刚刚我点了咩\"] Intent: OrderDetail " +
                               "\n\n Samples:[\"清空购物车\"] Intent: EmptyCart " +
                               "\n\n Samples:[\"有什么饮品介绍下吗\",\"有咩嘢饮啊\",\"有咩饮料吗\",\"有什么饮料吗\",\"提供哪些饮料选择\"] Intent: DrinkDetail " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
@@ -817,11 +829,12 @@ public class PhoneCallPlugin
             sb.Append(" 请问需要选择哪个规格呢？");
         }
 
-        specificationFoodDic[recommendFood.Id.ToString()] = recommendFood;
+        specificationFoodForChatList[this._chatId] = new Dictionary<string, MerchFoodDto>();
+        specificationFoodForChatList[this._chatId][recommendFood.Id.ToString()] = recommendFood;
         return await Task.FromResult(sb.ToString());
     }
 
-    static string FindCommonSubstring(string s1, string s2)
+    private string FindCommonSubstring(string s1, string s2)
     {
         int[,] dp = new int[s1.Length + 1, s2.Length + 1];
         int maxLength = 0;
@@ -855,10 +868,12 @@ public class PhoneCallPlugin
         return s1.Substring(endIndex - maxLength + 1, maxLength);
     }
 
-    private   HttpClient CreateYesmealHttpClient(Dictionary<string, string>? headers = null)
+    private HttpClient CreateYesmealHttpClient(Dictionary<string, string>? headers = null, bool? isFromClient = false)
     {
+        var token = isFromClient == true ? this._tokenManager.GetToken(this._chatId) : _thirdPartyTokenOptions.Yesmeal;
+
         var httpClient = _httpClientFactory.CreateClient();
-        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_thirdPartyTokenOptions.Yesmeal}");
+        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
         httpClient.DefaultRequestHeaders.Add("Source_System",
             headers == null || !headers.ContainsKey("SourceSystem") ? "1" : headers["SourceSystem"]);
         httpClient.DefaultRequestHeaders.Add("language_code",
