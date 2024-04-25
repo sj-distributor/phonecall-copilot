@@ -118,7 +118,7 @@ public class ChatHistoryController : ControllerBase
         var token = _tokenManager.SetToken( newChat.Id);
 
         if (string.IsNullOrWhiteSpace(token))
-            return this.NotFound(" token had exhausted");
+            return this.NotFound(" token had exhausted, remain count:" +  _tokenManager.TokenCount());
 
         this._logger.LogDebug("Created chat session with token {0}.", token);
 

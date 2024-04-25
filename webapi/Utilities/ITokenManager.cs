@@ -17,6 +17,8 @@ public interface ITokenManager
     string SetToken(string chatId);
 
     void ReleaseToken(string chatId);
+
+    int TokenCount();
 }
 
 public class TokenManager : ITokenManager
@@ -31,6 +33,10 @@ public class TokenManager : ITokenManager
         availableTokens = new ConcurrentQueue<string>(thirdPartyTokens.Value.YesmealTokensForClient.Split(","));
     }
 
+    public int TokenCount()
+    {
+        return availableTokens.Count;
+    }
     public string GetToken(string chatId)
     {
         userTokenMap.TryGetValue(chatId, out string token);

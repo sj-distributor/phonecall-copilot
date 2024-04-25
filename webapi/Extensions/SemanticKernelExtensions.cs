@@ -137,8 +137,8 @@ internal static class SemanticKernelExtensions
 
         // Yesmeal plugin
         kernel.ImportPluginFromObject(new PhoneCallPlugin(sp.GetRequiredService<IHttpClientFactory>(),
-                sp.GetRequiredService<IOptions<ThirdPartyTokenOptions>>(), sp.GetRequiredService<ITokenManager>()),
-            nameof(PhoneCallPlugin));
+            sp.GetRequiredService<IOptions<ThirdPartyTokenOptions>>(),
+            sp.GetRequiredService<ITokenManager>()));
 
         return Task.CompletedTask;
     }
