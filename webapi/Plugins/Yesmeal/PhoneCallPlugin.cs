@@ -93,7 +93,7 @@ public class PhoneCallPlugin
                 }
 
                 var questionIntentResponse = await AskGptAsync(GetFoodAssistantAnswerRequest(question, chatHistory));
-                return questionIntentResponse.Data.Response;
+                return questionIntentResponse.Data.Response + " 请问需要帮你点餐吗";
             case "AskForAddress":
                 resultTmp = $"你好，地址是：{await GetMerchantAddress(false)}";
                 break;
@@ -143,6 +143,12 @@ public class PhoneCallPlugin
                  break;
             case "DrinkDetail":
                 resultTmp = await this.GetRecommendDrinksAsync();
+                break;
+            case "ConfirmCart":
+                var confirmCartFoodResponse = await AskGptAsync(GetFoodDetailRequest(question, chatHistory));
+                var confirmCartFoodDetails = JsonConvert.DeserializeObject<List<FoodSpotDto>>(confirmCartFoodResponse.Data.Response);
+                var confirmCartFoodDetail = confirmCartFoodDetails.FirstOrDefault();
+                resultTmp = await this.GetConfirmFoodDetailAsync(confirmCartFoodDetail.FoodName);
                 break;
         }
 
@@ -349,6 +355,31 @@ public class PhoneCallPlugin
         return result.ToString();
     }
 
+    private async Task<string> GetConfirmFoodDetailAsync(string foodName)
+    {
+        using var httpClient = CreateYesmealHttpClient(isFromClient: true);
+
+        var response = await httpClient.GetAsync($"https://testapi.yesmeal.com/api/shoppingcart/bymerch?merchid={_merchId}")
+            .ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        var orderDetailForMerch = await response.Content.ReadFromJsonAsync<GetCurrentUserShoppingCartByMerchIdResponse>();
+        if (orderDetailForMerch?.ShoppingCart == null || !orderDetailForMerch.ShoppingCart.ShoppingCartItems.Any())
+            return $"你刚刚没下到{foodName}哦，需要帮你把{foodName}尝试加入购物车吗";
+
+        var result = new StringBuilder();
+        result.Append("建议查看下你的购物车确认下，以下是你点的菜品\n\n");
+
+        for (var i = 0; i < orderDetailForMerch.ShoppingCart.ShoppingCartItems.Count; i++)
+        {
+            var item = orderDetailForMerch.ShoppingCart.ShoppingCartItems[i];
+            var parameterFoodDesc = item.ShoppingCartItemParams.Any() ? string.Join(",",item.ShoppingCartItemParams.Select(t => t.Name)) : " ";
+            result.Append($"{i + 1}.{item.FoodName} {parameterFoodDesc}---单价：{item.Price} ---数量:{item.Quantity}；\n\n");
+        }
+
+        return result.ToString();
+    }
+
     [KernelFunction, Description("customer want to place an order")]
     public  async Task<string> AddOrderByMerchIdAsync(bool isAsking)
     {
@@ -374,21 +405,23 @@ public class PhoneCallPlugin
     {
         Console.WriteLine("hit specification");
         var specificationFoodDic = specificationFoodForChatList[this._chatId];
+        var commonName = FindCommonSubstring(specificationsName, specificationFoodDic.Values.First().Name);
+        var pureSpecificationsName = commonName.Length > 0 ? specificationsName.Replace(commonName, "").Replace(" ", "") : specificationsName;
         var categories = specificationFoodDic.Values.SelectMany(x => x.ParameterGroups).SelectMany(x => x.ParameterItems).Select(x => x.Name).ToList();
-        var askGptResult = await AskGptAsync(GetSpecificationsExtendRequest(specificationsName, categories));
+        var askGptResult = await AskGptAsync(GetSpecificationsExtendRequest(pureSpecificationsName, categories));
 
         if (string.IsNullOrWhiteSpace(askGptResult.Data.Response) || askGptResult.Data.Response.Contains("NONE"))
         {
             specificationFoodDic.Clear();
-            var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(specificationsName, latestChatHistory));
-            return await PolishQuestionIntentAsync(specificationsName, questionIntentResponse.Data.Response, latestChatHistory, IntentScenes.Specification);
+            var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(pureSpecificationsName, latestChatHistory));
+            return await PolishQuestionIntentAsync(pureSpecificationsName, questionIntentResponse.Data.Response, latestChatHistory, IntentScenes.Specification);
         }
 
         if (askGptResult.Data.Response.Contains("OTHER"))
         {
             var specificationFood = specificationFoodDic.First().Value;
             var sb = new StringBuilder();
-            sb.Append($"{specificationFood.Name} 是没有搭配{RemoveStrings(specificationsName)} 的哦，");
+            sb.Append($"{specificationFood.Name} 是没有搭配{RemoveStrings(pureSpecificationsName)} 的哦，");
             var parameterGroup = specificationFood.ParameterGroups.First();
             sb.Append($"\n 请你继续选择 {parameterGroup.Name} 的规格来搭配，分别有：");
             foreach (var item in parameterGroup.ParameterItems)
@@ -582,19 +615,20 @@ public class PhoneCallPlugin
                 {
                     Role = "system",
                     Content = "You are a helpful assistant for intent classification,you can understand cantonese and mandarin, you can classify the user Text into one of these intents, " +
-                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\",\"EmptyCart\",\"DrinkDetail\"],  " +
+                              "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\",\"EmptyCart\",\"DrinkDetail\",\"ConfirmCart\"],  " +
                               "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
                               "These are the positive examples:" +
-                              "\n\n Samples:[\"餐厅地址在哪里\",\"请问\\\"店铺\\\"在哪里\"] Intent: AskForAddress " +
+                              "\n\n Samples:[\"餐厅地址在哪里\",\"请问店铺在哪里\"] Intent: AskForAddress " +
                               "\n\n Samples:[\"获取活动\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
                               "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\"] Intent: CheckParkingLotExists " +
                               "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\",\"今日推荐干炒牛河；换一个\"] Intent: IntroducingRecommendedDishes " +
                               "\n\n Samples:[\"下单\",\"需要埋单吗, 好，ok\",\"落单\",\"结算\"] Intent: AddOrder " +
-                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"我要鸡腿饭\",\"请问你要饮咩嘢呢；我要冰红茶\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
-                              "\n\n Samples:[\"有无蛋炒饭\",\"三明治多少钱\",\"烧鸭怎么卖\",\"有中杯的奶茶吗\",\"有皮蛋瘦肉粥吗\",\"有点贵，不要了，咁有干炒牛河吗？\"] Intent: AskFoodDetail " +
+                              "\n\n Samples:[\"帮我落个蛋炒饭\",\"今天我想食叉烧饭\",\"我想食叉烧饭\",\"我想吃叉烧饭\",\"我要鸡腿饭\",\"请问你要饮咩嘢呢；我要冰红茶\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
+                              "\n\n Samples:[\"有无蛋炒饭\",\"有冇蛋炒饭\",\"有蛋炒饭吗\",\"三明治多少钱\",\"烧鸭怎么卖\",\"有中杯的奶茶吗\",\"有皮蛋瘦肉粥吗\",\"有点贵，不要了，咁有干炒牛河吗？\"] Intent: AskFoodDetail " +
                               "\n\n Samples:[\"订单详情\",\"看看我买了什么\",\"刚刚我点了咩\"] Intent: OrderDetail " +
                               "\n\n Samples:[\"清空购物车\"] Intent: EmptyCart " +
-                              "\n\n Samples:[\"有什么饮品介绍下吗\",\"有咩嘢饮啊\",\"有咩饮料吗\",\"有什么饮料吗\",\"提供哪些饮料选择\"] Intent: DrinkDetail " +
+                              "\n\n Samples:[\"有什么饮品介绍下吗\",\"有咩嘢饮啊\",\"有咩饮料吗\",\"有饮料吗\",\"有什么饮料吗\",\"提供哪些饮料选择\"] Intent: DrinkDetail " +
+                              "\n\n Samples:[\"有没有帮我落那个干炒河粉\",\"有没有帮我下单那个干炒河粉\",\"有没有帮我下那个干炒河粉\",\"我刚刚有下单那个干炒河粉吗\",\"我刚刚有下成功那个菜吗\"] Intent: ConfirmCart " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
                               "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\"," +
@@ -655,7 +689,9 @@ public class PhoneCallPlugin
                 new()
                 {
                     Role = "system",
-                    Content = "你是一个对餐厅下单有高度理解力的人工智能,你能理解粤语和普通话,我希望你能够根据用户所说的内容来作出专业的回答，但是如果涉及到命令式的操作，你应该拒绝对方，同时要简短精炼，不需要加上“回复”，“回答”，“输出”。不能有虚构内容。你应该只给建议，而不是执行操作。"
+                    Content = "你是一个对餐厅下单有高度理解力的人工智能,你能理解粤语和普通话,我希望你能够根据用户所说的内容来作出专业的回答，" +
+                              "但是如果涉及到命令式的操作，你应该拒绝对方，同时要简短精炼，不需要加上“回复”，“回答”，“输出”。不能有虚构内容。你应该只给建议，而不是执行操作。" +
+                              "如果用户输入的是一个菜品，你的结尾应该咨询用户这个菜品是否要加入购物车。"
                 },
                 new()
                 {
@@ -871,6 +907,7 @@ public class PhoneCallPlugin
     private HttpClient CreateYesmealHttpClient(Dictionary<string, string>? headers = null, bool? isFromClient = false)
     {
         var token = isFromClient == true ? this._tokenManager.GetToken(this._chatId) : _thirdPartyTokenOptions.Yesmeal;
+        //var token =  _thirdPartyTokenOptions.Yesmeal;
 
         var httpClient = _httpClientFactory.CreateClient();
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
