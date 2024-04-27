@@ -104,7 +104,7 @@ public class PhoneCallPlugin
                 resultTmp = $"你好, {await GetMerchantParkingInfo(false)}, 请问还有什么可以帮到你吗";
                 break;
             case "IntroducingRecommendedDishes":
-                resultTmp = await GetRecommendDishWithoutSpecificCategoryName(false);
+                resultTmp = await GetRecommendDishWithoutSpecificCategoryName(question);
                 break;
             case "AddOrder":
                 resultTmp = await AddOrderByMerchIdAsync(false);
@@ -209,17 +209,16 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("Get merchant parking information")]
-    public   async Task<string> GetMerchantParkingInfo(bool isAsking)
+    private async Task<string> GetMerchantParkingInfo(bool isAsking)
     {
         return await Task.FromResult("暂无停车场");
     }
 
-    [KernelFunction, Description("Recommend a dish without specific category names，for example : user asked if he could recommend a dish")]
-    public   async Task<string> GetRecommendDishWithoutSpecificCategoryName(bool isAsking)
+    private async Task<string> GetRecommendDishWithoutSpecificCategoryName(string question)
     {
         Console.WriteLine("hit GetRecommendDishWithoutSpecificCategoryName");
 
-        var FoodCategory = new[] { "牛肉", "豬肉", "雞肉", "麵類", "粥" };
+        var FoodCategory = new[] { "牛肉", "豬肉", "雞肉", "面", "粥", "魚片","羊" };
         int seed = DateTime.Now.Millisecond;
         var random = new Random(seed);
         var randomNumber = random.Next(1, 6); // 生成1到5之间的随机数
@@ -232,7 +231,6 @@ public class PhoneCallPlugin
         return await Task.FromResult(resultTemplate);
     }
 
-    [KernelFunction, Description("Recommend a dish with specific category names，for example : user asked if there were any beef dishes to recommend.")]
     public async Task<string> GetRecommendDishWithSpecificCategoryName([Description("specific category name")]string categoryName,
         KernelArguments args)
     {
