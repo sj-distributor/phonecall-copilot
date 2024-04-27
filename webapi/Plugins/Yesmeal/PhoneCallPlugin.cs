@@ -535,7 +535,7 @@ public class PhoneCallPlugin
             using var httpClient = CreateSmartiesHttpClient();
             var httpContent = new StringContent(JsonConvert.SerializeObject(request));
             httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            var response = await httpClient.PostAsync("https://testsmarties.yamimeal.ca/api/Ask/general/query", httpContent)
+            var response = await httpClient.PostAsync("https://smarties.yamimeal.ca/api/Ask/general/query", httpContent)
                 .ConfigureAwait(false);
 
             response.EnsureSuccessStatusCode();
@@ -616,9 +616,9 @@ public class PhoneCallPlugin
                               "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\",\"EmptyCart\",\"DrinkDetail\",\"ConfirmCart\"],  " +
                               "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
                               "These are the positive examples:" +
-                              "\n\n Samples:[\"餐厅地址在哪里\",\"请问店铺在哪里\"] Intent: AskForAddress " +
+                              "\n\n Samples:[\"餐厅地址在哪里\",\"请问店铺在哪里\",\"你哋系边度\"] Intent: AskForAddress " +
                               "\n\n Samples:[\"获取活动\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
-                              "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\"] Intent: CheckParkingLotExists " +
+                              "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\",\"有冇车位\"] Intent: CheckParkingLotExists " +
                               "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\",\"今日推荐干炒牛河；换一个\"] Intent: IntroducingRecommendedDishes " +
                               "\n\n Samples:[\"下单\",\"需要埋单吗, 好，ok\",\"落单\",\"结算\"] Intent: AddOrder " +
                               "\n\n Samples:[\"帮我落个蛋炒饭\",\"今天我想食叉烧饭\",\"我想食叉烧饭\",\"我想吃叉烧饭\",\"我要鸡腿饭\",\"请问你要饮咩嘢呢；我要冰红茶\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
