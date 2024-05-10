@@ -93,7 +93,7 @@ public class PhoneCallPlugin
                 }
 
                 var questionIntentResponse = await AskGptAsync(GetFoodAssistantAnswerRequest(question, chatHistory));
-                return questionIntentResponse.Data.Response + " 请问需要帮你点餐吗";
+                return questionIntentResponse.Data.Response + (questionIntentResponse.Data.Response.Contains("购物车") ? "" : " 请问需要帮你点餐吗");
             case "AskForAddress":
                 resultTmp = $"你好，地址是：{await GetMerchantAddress(false)}";
                 break;
@@ -315,9 +315,11 @@ public class PhoneCallPlugin
                 var stringBuilder = new StringBuilder($"查询到{recommendFood.Name},价钱：{recommendFood.Price}");
                 var parameterGroup = recommendFood.ParameterGroups.First();
                 stringBuilder.Append($"\n ，在规格 {parameterGroup.Name}({parameterGroup.Description})，分别有：");
+
                 foreach (var item in parameterGroup.ParameterItems)
                 {
-                    stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
+                    string priceTemplate = item.Price > 0 ? $"，价格：{item.Price}" : string.Empty;
+                    stringBuilder.Append($"[{item.Name}{priceTemplate}] ,");
                 }
 
                 specificationFoodForChatList[this._chatId] = new Dictionary<string, MerchFoodDto>();
@@ -464,7 +466,8 @@ public class PhoneCallPlugin
                 stringBuilder.Append($"好的，已帮你选择{foodGroupParameter.Name}规格：{foodItemParameter.Name} \n 在{needSelectedFoodGroup.Name}规格方面还有以下需要选择：");
                 foreach (var item in needSelectedFoodGroup.ParameterItems)
                 {
-                    stringBuilder.Append($"[{item.Name}，价格：{item.Price}] ,");
+                    string priceTemplate = item.Price > 0 ? $"，价格：{item.Price}" : string.Empty;
+                    stringBuilder.Append($"[{item.Name}{priceTemplate}] ,");
                 }
 
                 stringBuilder.Append("\n 请问你需要哪一个？");
@@ -616,9 +619,9 @@ public class PhoneCallPlugin
                               "Intents: [\"NONE\",\"AskForAddress\",\"GetActivity\",\"CheckParkingLotExists\",\"IntroducingRecommendedDishes\",\"AddOrder\",\"AddCart\",\"AskFoodDetail\",\"OrderDetail\",\"EmptyCart\",\"DrinkDetail\",\"ConfirmCart\"],  " +
                               "you SHOULD ONLY answer if you are very sure, otherwise reply ''Intent: NONE''." +
                               "These are the positive examples:" +
-                              "\n\n Samples:[\"餐厅地址在哪里\",\"请问店铺在哪里\",\"你哋系边度\"] Intent: AskForAddress " +
-                              "\n\n Samples:[\"获取活动\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
-                              "\n\n Samples:[\"有没有停车场呀\",\"能不能停车呀\",\"有冇车位\"] Intent: CheckParkingLotExists " +
+                              "\n\n Samples:[\"餐厅地址在哪里\",\"餐厅地址系边度\",\"请问店铺在哪里\",\"你哋系边度\"] Intent: AskForAddress " +
+                              "\n\n Samples:[\"获取活动\",\"餐厅有什么优惠\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
+                              "\n\n Samples:[\"有没有停车场呀\",\"停车场在哪里\",\"能不能停车呀\",\"有冇车位\"] Intent: CheckParkingLotExists " +
                               "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\",\"今日推荐干炒牛河；换一个\"] Intent: IntroducingRecommendedDishes " +
                               "\n\n Samples:[\"下单\",\"需要埋单吗, 好，ok\",\"落单\",\"结算\"] Intent: AddOrder " +
                               "\n\n Samples:[\"帮我落个蛋炒饭\",\"今天我想食叉烧饭\",\"我想食叉烧饭\",\"我想吃叉烧饭\",\"我要鸡腿饭\",\"请问你要饮咩嘢呢；我要冰红茶\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
@@ -629,7 +632,7 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"有没有帮我落那个干炒河粉\",\"有没有帮我下单那个干炒河粉\",\"有没有帮我下那个干炒河粉\",\"我刚刚有下单那个干炒河粉吗\",\"我刚刚有下成功那个菜吗\"] Intent: ConfirmCart " +
                               "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
-                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"停车场在哪里\",\"暂无停车场\"," +
+                              "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"暂无停车场\"," +
                               "\"我想落张电话单\",\"不要了\",\"点菜\"] Intent: NONE"
                 },
                 new()
@@ -844,7 +847,8 @@ public class PhoneCallPlugin
                 sb.Append($"好的，已帮你选择规格为 {foodItem.Name}的{recommendFood.Name} \n 在{needSelectedFoodGroup.Name}规格方面还有以下需要选择：");
                 foreach (var item in needSelectedFoodGroup.ParameterItems)
                 {
-                    sb.Append($"[{item.Name}，价格：{item.Price}] ,");
+                    string priceTemplate = item.Price > 0 ? $"，价格：{item.Price}" : string.Empty;
+                    sb.Append($"[{item.Name}{priceTemplate}] ,");
                 }
 
                 sb.Append("\n 请问你需要哪一个？");
