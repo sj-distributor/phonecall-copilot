@@ -101,7 +101,7 @@ public class PhoneCallPlugin
                 resultTmp = $"{await GetMerchantCampaign(false)}, 请问需要下单吗";
                 break;
             case "CheckParkingLotExists":
-                resultTmp = $"你好, {await GetMerchantParkingInfo(false)}, 请问还有什么可以帮到你吗";
+                resultTmp = $"你好, {await GetMerchantParkingInfo()}, 请问还有什么可以帮到你吗";
                 break;
             case "IntroducingRecommendedDishes":
                 resultTmp = await GetRecommendDishWithoutSpecificCategoryName(question);
@@ -209,9 +209,25 @@ public class PhoneCallPlugin
     }
 
     [KernelFunction, Description("Get merchant parking information")]
-    private async Task<string> GetMerchantParkingInfo(bool isAsking)
+    private async Task<string> GetMerchantParkingInfo()
     {
-        return await Task.FromResult("暂无停车场");
+        return await AsyncUtils.SafeInvokeAsync<string>(async () =>
+        {
+            using var  httpClient = CreateYesmealHttpClient();
+
+            var response = await httpClient.GetAsync("https://testapi.yamimeal.com/api/Merch/get?Id=3bd51ea0-9b3e-45f2-92b7-c30fb162f910")
+                .ConfigureAwait(false);
+
+            response.EnsureSuccessStatusCode();
+            var merch = await response.Content.ReadFromJsonAsync<GetMerchByIdRespone>();
+
+            if (merch.Result.MerchParkingLotPickupSupportType == MerchParkingLotPickupSupportType.NotSupported)
+                return "暂无停车场哦";
+            else
+            {
+                return "餐厅附近有停车场哦，欢迎你驾车过来";
+            }
+        }, nameof(GetMerchantAddress));
     }
 
     private async Task<string> GetRecommendDishWithoutSpecificCategoryName(string question)
@@ -621,7 +637,7 @@ public class PhoneCallPlugin
                               "These are the positive examples:" +
                               "\n\n Samples:[\"餐厅地址在哪里\",\"餐厅地址系边度\",\"请问店铺在哪里\",\"你哋系边度\",\"餐厅地址在哪里, 有没有停车场\"] Intent: AskForAddress " +
                               "\n\n Samples:[\"获取活动\",\"餐厅有什么优惠\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
-                              "\n\n Samples:[\"有没有停车场呀\",\"停车场在哪里\",\"能不能停车呀\",\"有冇车位\",\"停车场系边度\"] Intent: CheckParkingLotExists " +
+                              "\n\n Samples:[\"有没有停车场呀\",\"停车场在哪里\",\"能不能停车呀\",\"有冇车位\",\"停车场系边度\",\"现在可以停车吗\"] Intent: CheckParkingLotExists " +
                               "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\",\"今日推荐干炒牛河；换一个\"] Intent: IntroducingRecommendedDishes " +
                               "\n\n Samples:[\"下单\",\"需要埋单吗, 好，ok\",\"落单\",\"结算\"] Intent: AddOrder " +
                               "\n\n Samples:[\"帮我落个蛋炒饭\",\"今天我想食叉烧饭\",\"我想食叉烧饭\",\"我想吃叉烧饭\",\"我要鸡腿饭\",\"请问你要饮咩嘢呢；我要冰红茶\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
@@ -630,7 +646,7 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"清空购物车\"] Intent: EmptyCart " +
                               "\n\n Samples:[\"有什么饮品介绍下吗\",\"有咩嘢饮啊\",\"有咩饮料吗\",\"有饮料吗\",\"有什么饮料吗\",\"提供哪些饮料选择\"] Intent: DrinkDetail " +
                               "\n\n Samples:[\"有没有帮我落那个干炒河粉\",\"有没有帮我下单那个干炒河粉\",\"有没有帮我下那个干炒河粉\",\"我刚刚有下单那个干炒河粉吗\",\"我刚刚有下成功那个菜吗\"] Intent: ConfirmCart " +
-                              "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
+                              "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有无车位呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
                               "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"暂无停车场\"," +
                               "\"我想落张电话单\",\"不要了\",\"点菜\"] Intent: NONE"
