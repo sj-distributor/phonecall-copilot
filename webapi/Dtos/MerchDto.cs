@@ -13,4 +13,13 @@ public class MerchDto
     public string Address { get; set; }
     public decimal? Lat { get; set; }
     public decimal? Lng { get; set; }
+
+    public MerchParkingLotPickupSupportType MerchParkingLotPickupSupportType { get; set; }
+}
+
+public enum MerchParkingLotPickupSupportType
+{
+    NotSupported,
+    ParkingLotOnly,
+    OptionalParkingLot
 }
