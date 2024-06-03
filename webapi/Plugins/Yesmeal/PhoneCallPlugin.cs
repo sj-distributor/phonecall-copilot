@@ -54,8 +54,8 @@ public class PhoneCallPlugin
                     return await AddSpecificationsFoodsync(askContent.Question, askContent.LatestChatHistory);
             }
 
-            var questionIntentResponse = await AskGptAsync(GetQuestionIntentRequest(askContent.Question, askContent.LatestChatHistory));
-            return await PolishQuestionIntentAsync(askContent.Question, questionIntentResponse.Data.Response, askContent.LatestChatHistory);
+            var questionIntentResponse = await ProcessAskGptAsync(() => GetQuestionIntentRequest(askContent.Question, askContent.LatestChatHistory));
+            return await PolishQuestionIntentAsync(askContent.Question, questionIntentResponse, askContent.LatestChatHistory);
         }
         catch (Exception e)
         {
@@ -80,20 +80,17 @@ public class PhoneCallPlugin
     {
         var intentValue = questionIntent.Split(':')[1]?.Trim();
         var resultTmp = string.Empty;
+
         switch (intentValue)
         {
             case "NONE":
-                if (intentScenes == IntentScenes.Specification)
+                if (intentScenes == IntentScenes.Specification && specificationFoodForChatList.ContainsKey(this._chatId))
                 {
-                    if (specificationFoodForChatList.Keys.Any(x => x == this._chatId))
-                    {
-                        var specificationFoodDic = specificationFoodForChatList[this._chatId];
-                        specificationFoodDic.Clear();
-                    }
+                    specificationFoodForChatList[this._chatId].Clear();
                 }
 
-                var questionIntentResponse = await AskGptAsync(GetFoodAssistantAnswerRequest(question, chatHistory));
-                return questionIntentResponse.Data.Response + (questionIntentResponse.Data.Response.Contains("购物车") ? "" : " 请问需要帮你点餐吗");
+                var questionIntentResponse = await ProcessAskGptAsync(() => GetFoodAssistantAnswerRequest(question, chatHistory));
+                return questionIntentResponse + (questionIntentResponse.Contains("购物车") ? "" : " 请问需要帮你点餐吗");
             case "AskForAddress":
                 resultTmp = $"你好，餐厅地址是：{await GetMerchantAddress(false)}";
                 break;
@@ -110,29 +107,20 @@ public class PhoneCallPlugin
                 resultTmp = await AddOrderByMerchIdAsync(false);
                 break;
             case "AskFoodDetail":
-                var askFoodDetailResponse = await AskGptAsync(GetFoodDetailRequest(question, chatHistory));
-                var foodSpotDtoForFoodDetails = JsonConvert.DeserializeObject<List<FoodSpotDto>>(askFoodDetailResponse.Data.Response);
-
-                var foodSpotDtoForFoodDetail = foodSpotDtoForFoodDetails.FirstOrDefault();
-                resultTmp = await AskForFoodDetail(foodSpotDtoForFoodDetail.FoodName, foodSpotDtoForFoodDetail.Quantity.GetValueOrDefault().ToString(),
-                    foodSpotDtoForFoodDetail.SpecialRequirement, true);
+                var askFoodDetailResponse = await ProcessAskGptAsync(() => GetFoodDetailRequest(question, chatHistory));
+                var foodDetails = DeserializeFoodSpotDtoAsync(askFoodDetailResponse);
+                var foodDetail = foodDetails.FirstOrDefault();
+                resultTmp = await AskForFoodDetail(foodDetail.FoodName, foodDetail.Quantity.GetValueOrDefault().ToString(),
+                    foodDetail.SpecialRequirement, true);
                 break;
             case "AddCart":
-                var askAddCartResponse = await AskGptAsync(GetFoodDetailRequest(question, chatHistory));
-                var foodSpotDtoForCarts = JsonConvert.DeserializeObject<List<FoodSpotDto>>(askAddCartResponse.Data.Response);
-
-                var foodSpotDtoForCart = foodSpotDtoForCarts.FirstOrDefault();
-                if (foodSpotDtoForCart.FoodName != null)
-                {
-                    resultTmp = await AskForFoodDetail(foodSpotDtoForCart.FoodName,
-                        foodSpotDtoForCart.Quantity.GetValueOrDefault().ToString(),
-                        foodSpotDtoForCart.SpecialRequirement, false, IntentSource.AskAddCart, intentScenes,
-                        chatHistory);
-                }
-                else
-                {
-                    resultTmp = "你好，不太清楚你要的菜品，可以再和我说多一次吗？";
-                }
+                var askAddCartResponse = await ProcessAskGptAsync(() => GetFoodDetailRequest(question, chatHistory));
+                var cartDetails = DeserializeFoodSpotDtoAsync(askAddCartResponse);
+                var cartDetail = cartDetails.FirstOrDefault();
+                resultTmp = cartDetail.FoodName != null
+                    ? await AskForFoodDetail(cartDetail.FoodName, cartDetail.Quantity.GetValueOrDefault().ToString(),
+                        cartDetail.SpecialRequirement, false, IntentSource.AskAddCart, intentScenes, chatHistory)
+                    : "你好，不太清楚你要的菜品，可以再和我说多一次吗？";
                 break;
             case "OrderDetail":
                 resultTmp = await GetMerchantOrderDetailAsync();
@@ -145,10 +133,10 @@ public class PhoneCallPlugin
                 resultTmp = await this.GetRecommendDrinksAsync();
                 break;
             case "ConfirmCart":
-                var confirmCartFoodResponse = await AskGptAsync(GetFoodDetailRequest(question, chatHistory));
-                var confirmCartFoodDetails = JsonConvert.DeserializeObject<List<FoodSpotDto>>(confirmCartFoodResponse.Data.Response);
-                var confirmCartFoodDetail = confirmCartFoodDetails.FirstOrDefault();
-                resultTmp = await this.GetConfirmFoodDetailAsync(confirmCartFoodDetail.FoodName);
+                var confirmCartResponse = await ProcessAskGptAsync(() => GetFoodDetailRequest(question, chatHistory));
+                var confirmCartDetails = DeserializeFoodSpotDtoAsync(confirmCartResponse);
+                var confirmCartDetail = confirmCartDetails.FirstOrDefault();
+                resultTmp = await this.GetConfirmFoodDetailAsync(confirmCartDetail.FoodName);
                 break;
         }
 
@@ -637,7 +625,7 @@ public class PhoneCallPlugin
                               "These are the positive examples:" +
                               "\n\n Samples:[\"餐厅地址在哪里\",\"餐厅地址系边度\",\"请问店铺在哪里\",\"你哋系边度\",\"餐厅地址在哪里, 有没有停车场\"] Intent: AskForAddress " +
                               "\n\n Samples:[\"获取活动\",\"餐厅有什么优惠\",\"最近有什么活动\",\"帮我查询下最近的活动\"] Intent: GetActivity " +
-                              "\n\n Samples:[\"有没有停车场呀\",\"停车场在哪里\",\"能不能停车呀\",\"有冇车位\",\"停车场系边度\",\"现在可以停车吗\"] Intent: CheckParkingLotExists " +
+                              "\n\n Samples:[\"有没有停车场呀\",\"停车场在哪里\",\"能不能停车呀\",\"停车场系边度\",\"现在可以停车吗\"] Intent: CheckParkingLotExists " +
                               "\n\n Samples:[\"有什么菜可以介绍下吗\",\"帮我介绍下招牌菜\",\"我不知道吃什么，有什么推荐吗\",\"有无特价菜\",\"推荐下招牌菜\",\"还有其他推荐吗\",\"今日推荐干炒牛河；换一个\"] Intent: IntroducingRecommendedDishes " +
                               "\n\n Samples:[\"下单\",\"需要埋单吗, 好，ok\",\"落单\",\"结算\"] Intent: AddOrder " +
                               "\n\n Samples:[\"帮我落个蛋炒饭\",\"今天我想食叉烧饭\",\"我想食叉烧饭\",\"我想吃叉烧饭\",\"我要鸡腿饭\",\"请问你要饮咩嘢呢；我要冰红茶\",\"来个牛肉饭\",\"要一份\",\"加入购物车\",\"今日推荐，需要帮你加入购物车吗；好，ok，嗯\"] Intent: AddCart " +
@@ -646,7 +634,7 @@ public class PhoneCallPlugin
                               "\n\n Samples:[\"清空购物车\"] Intent: EmptyCart " +
                               "\n\n Samples:[\"有什么饮品介绍下吗\",\"有咩嘢饮啊\",\"有咩饮料吗\",\"有饮料吗\",\"有什么饮料吗\",\"提供哪些饮料选择\"] Intent: DrinkDetail " +
                               "\n\n Samples:[\"有没有帮我落那个干炒河粉\",\"有没有帮我下单那个干炒河粉\",\"有没有帮我下那个干炒河粉\",\"我刚刚有下单那个干炒河粉吗\",\"我刚刚有下成功那个菜吗\"] Intent: ConfirmCart " +
-                              "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"有无车位呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
+                              "\n\n These are the navigate examples: Samples:[\"能停车多久呀\",\"现在有无车位呀\",\"有多少停车位呀\",\"什么时候开放呀\",\"这碟菜加葱吗\"," +
                               "\"有饮料提供吗\",\"有厕所吗\",\"有洗手间吗\",\"有婴儿座位吗\",\"店铺能坐多少人\",\"好不好吃\",\"菜的口味是怎么样的\",\"有什么其他配菜\"," +
                               "\"菜品辣不辣？\",\"菜品的烹饪方式是怎么样？\",\"菜品的做法\",\"点整\",\"怎么煮\",\"暂无停车场\"," +
                               "\"我想落张电话单\",\"不要了\",\"点菜\"] Intent: NONE"
@@ -729,7 +717,7 @@ public class PhoneCallPlugin
         return new AskGptRequest
         {
             Model = 6,
-           // ResponseFormat = new ResponseFormat { Type = "json_object" },
+            ResponseFormat = new ResponseFormat { Type = "json_object" },
             Messages = new List<AskSmartiesMessageDto>
             {
                 new()
@@ -936,11 +924,29 @@ public class PhoneCallPlugin
         return httpClient;
     }
 
-    private   HttpClient CreateSmartiesHttpClient()
+    private HttpClient CreateSmartiesHttpClient()
     {
         var httpClient = _httpClientFactory.CreateClient();
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_thirdPartyTokenOptions.Smarties}");
         httpClient.DefaultRequestHeaders.Add("accept",  "text/plain");
         return httpClient;
+    }
+
+    private async Task<string> ProcessAskGptAsync(Func<AskGptRequest> requestGenerator)
+    {
+        var response = await AskGptAsync(requestGenerator());
+        return response.Data.Response;
+    }
+
+    private List<FoodSpotDto> DeserializeFoodSpotDtoAsync(string response)
+    {
+        if (response.Contains("["))
+        {
+            return JsonConvert.DeserializeObject<List<FoodSpotDto>>(response);
+        }
+        else
+        {
+            return new List<FoodSpotDto> { JsonConvert.DeserializeObject<FoodSpotDto>(response) };
+        }
     }
 }
